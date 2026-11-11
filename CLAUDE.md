@@ -30,7 +30,9 @@ Playwright is installed globally in the cloud containers; don't run `playwright 
 - Plans say what, never how: no store names or traversal orders in the plan format. The match planner decides.
 - A new store passes `test/store-conformance.test.ts`, the Cypher suites (`describe.each` over stores) and the
   differential test.
-- Every Cypher block in `docs/` and every playground example runs in `test/docs-examples.test.ts`.
+- Every ```` ```cypher ```` block in `docs/` is runnable on the site (`docs/.vitepress/theme/runnable.ts`) on a sample
+  dataset: the fence's `dataset=…`, else the page's front matter `dataset:`, else `social`; `noplay` keeps one plain.
+  `test/docs-examples.test.ts` runs each on that dataset and requires rows, and runs every playground example.
 - A Cypher feature that isn't supported fails with an error, never a wrong answer; list it in
   `docs/reference/divergences.md`.
 - No runtime dependencies. Ask the owner before adding any package, as the family's rules say.

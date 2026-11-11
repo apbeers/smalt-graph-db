@@ -4,7 +4,7 @@
 
 **Small. Alternative. Connected.** A graph database for the browser that speaks Cypher, written in TypeScript.
 
-[Documentation and playground](https://apbeers.github.io/smalt-graph-db/) · [smaltworks.dev](https://smaltworks.dev)
+[Documentation](https://andrewbeers.me/smalt-graph-db/) · [Playground](https://andrewbeers.me/smalt-graph-db/playground) · [Tech demo](https://andrewbeers.me/smalt-graph-db/demo) · [smaltworks.dev](https://smaltworks.dev)
 
 **smaltcy** keeps a graph of nodes and relationships in the page and answers Cypher queries on it. Cypher compiles
 to **graph plans**, plain JSON that the engine validates and runs, and the engine runs the same plans on any

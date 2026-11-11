@@ -1,16 +1,31 @@
 /** The worker's request handling, kept apart from `self` so tests can run it in Node. */
-import { open, type Graph } from '../index.js';
+import { CsrStore, open, type Graph } from '../index.js';
+import { family, metro, network, social } from '../datasets/index.js';
 import { SmaltcyError } from '../errors.js';
 import type { GraphStore } from '../store/interface.js';
-import type { Overview, Request, Response } from './protocol.js';
+import type { DatasetLoaded, DatasetRequest, Overview, Request, Response } from './protocol.js';
+
+const keyOf = (d: DatasetRequest) => `${d.name}:${d.size ?? ''}:${d.store ?? 'memory'}`;
+
+function generate(d: DatasetRequest) {
+  switch (d.name) {
+    case 'social': return social();
+    case 'family': return family();
+    case 'metro': return metro();
+    case 'network': return network(d.size ?? 2000);
+  }
+  throw new SmaltcyError('SMALTCY_NOT_FOUND', `No sample dataset ${String((d as { name: unknown }).name)}`);
+}
 
 /** Labels in order of preference for a node's caption. */
 const CAPTION_KEYS = ['name', 'title', 'label', 'id', 'code'];
 
-export function overview(store: GraphStore, limit = Infinity, keys: readonly string[] = CAPTION_KEYS): Overview {
+export function overview(store: GraphStore, limit = Infinity, keys: readonly string[] = CAPTION_KEYS, groupKey?: string): Overview {
+  const t0 = performance.now();
   const ids: number[] = [];
   const labels: string[] = [];
   const captions: string[] = [];
+  const groups: string[] | undefined = groupKey ? [] : undefined;
   const index = new Map<number, number>();
   store.scanNodes(null, (id) => {
     if (ids.length >= limit) return false;
@@ -26,6 +41,10 @@ export function overview(store: GraphStore, limit = Infinity, keys: readonly str
       }
     }
     captions.push(cap);
+    if (groups) {
+      const g = store.nodeProperty(id, groupKey!);
+      groups.push(g === undefined || g === null ? '' : String(g));
+    }
   });
   const edges: number[] = [];
   const edgeTypes: string[] = [];
@@ -39,11 +58,24 @@ export function overview(store: GraphStore, limit = Infinity, keys: readonly str
   });
   let total = 0;
   store.scanNodes(null, () => void total++);
-  return { ids, labels, captions, edges, edgeTypes, truncated: total > ids.length };
+  return { ids, labels, captions, ...(groups ? { groups } : {}), edges, edgeTypes, truncated: total > ids.length, ms: performance.now() - t0 };
 }
 
 export function createHandler(graph: Graph = open()): { handle(req: Request): Response; graph: Graph } {
-  const state = { graph };
+  // The sample dataset the graph holds, unchanged since it was loaded; null once a write changes it.
+  const state: { graph: Graph; dataset: string | null } = { graph, dataset: null };
+  const useDataset = (d: DatasetRequest): DatasetLoaded => {
+    const key = keyOf(d);
+    const st0 = () => state.graph.store.stats();
+    if (state.dataset === key) return { nodes: st0().nodes, relationships: st0().rels, ms: 0, reused: true };
+    const t0 = performance.now();
+    const g = open();
+    g.load(generate(d));
+    state.graph = d.store === 'csr' ? open({ store: CsrStore.from(g.store) }) : g;
+    state.dataset = key;
+    const st = st0();
+    return { nodes: st.nodes, relationships: st.rels, ms: performance.now() - t0, reused: false };
+  };
   return {
     get graph() {
       return state.graph;
@@ -52,8 +84,15 @@ export function createHandler(graph: Graph = open()): { handle(req: Request): Re
       try {
         const g = state.graph;
         switch (req.type) {
-          case 'run': return { id: req.id, ok: true, result: g.run(req.cypher, req.params ?? {}) };
+          case 'run': {
+            if (req.dataset) useDataset(req.dataset);
+            const r = state.graph.run(req.cypher, req.params ?? {});
+            if (Object.values(r.counts).some((n) => n > 0)) state.dataset = null;
+            return { id: req.id, ok: true, result: r };
+          }
+          case 'dataset': return { id: req.id, ok: true, result: useDataset(req.dataset) };
           case 'load':
+            state.dataset = null;
             if (req.replace) state.graph = open();
             state.graph.load(req.data);
             return { id: req.id, ok: true, result: null };
@@ -62,7 +101,7 @@ export function createHandler(graph: Graph = open()): { handle(req: Request): Re
             const st = g.store.stats();
             return { id: req.id, ok: true, result: { nodes: st.nodes, relationships: st.rels, labels: Object.fromEntries(st.labels), types: Object.fromEntries(st.types) } };
           }
-          case 'overview': return { id: req.id, ok: true, result: overview(g.store, req.limit, req.captionKeys) };
+          case 'overview': return { id: req.id, ok: true, result: overview(g.store, req.limit, req.captionKeys, req.groupKey) };
         }
       } catch (e) {
         const err = e instanceof SmaltcyError ? { code: e.code, message: e.message, position: e.position } : { code: 'SMALTCY_INTERNAL', message: String((e as Error)?.message ?? e) };

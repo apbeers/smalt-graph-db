@@ -26,7 +26,7 @@ differs](./divergences) lists the known differences.
 ## Patterns
 
 ```cypher
-MATCH (a:Person {name: 'Ada'})-[k:KNOWS]->(b)<-[:LIVES_IN]-(c:City)
+MATCH (a:Person {name: 'Ada'})-[k:KNOWS]->(b)-[:LIVES_IN]->(c:City)
 RETURN a, k, b
 ```
 

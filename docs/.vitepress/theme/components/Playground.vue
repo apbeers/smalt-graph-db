@@ -3,22 +3,23 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useData } from 'vitepress'
 import { connect, type GraphClient } from '../../../../src/worker/client'
-import type { GraphJSON } from '../../../../src/engine/io'
-import { family, metro, network, social } from '../../../../src/datasets/index'
+import type { DatasetRequest } from '../../../../src/worker/protocol'
 import { createGraphView, GpuUnavailableError, type GraphView, type RenderGraph } from '../../../../src/render/index'
 import { EXAMPLES, type DatasetKey } from './examples'
+import { collect as collectRows, decodeCode, fmt, toRender as toRenderGraph, type GEdge, type GNode } from '../graph-results'
 
 type Row = readonly unknown[]
 interface Hit { kind: 'node' | 'edge'; index: number }
 
 const { isDark } = useData()
 
-const DATASETS: Record<DatasetKey, { title: string; make: () => GraphJSON }> = {
-  social: { title: 'Social: people, cities, topics', make: social },
-  family: { title: 'The smalt family', make: family },
-  metro: { title: 'Metro: 8 lines, ~240 stations', make: metro },
-  network: { title: 'Network: 5,000 people', make: () => network(5000) },
-  big: { title: 'Network: 20,000 people', make: () => network(20000) },
+// Generated in the engine's worker (DatasetRequest), so large ones don't hold up the page.
+const DATASETS: Record<DatasetKey, { title: string; req: DatasetRequest }> = {
+  social: { title: 'Social: people, cities, topics', req: { name: 'social' } },
+  family: { title: 'The smalt family', req: { name: 'family' } },
+  metro: { title: 'Metro: 8 lines, ~240 stations', req: { name: 'metro' } },
+  network: { title: 'Network: 5,000 people', req: { name: 'network', size: 5000 } },
+  big: { title: 'Network: 20,000 people', req: { name: 'network', size: 20000 } },
 }
 
 const dataset = ref<DatasetKey>('social')
@@ -42,56 +43,24 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 let client: GraphClient | null = null
 let view: GraphView | null = null
 let statsTimer = 0
+/** The query a link opened the playground with, until its dataset has loaded. */
+let initial: string | null = null
+let runAfterLoad = false
 
 /** What's drawn: graph elements by engine id, in the renderer's order. */
-interface GNode { id: number; labels: string[]; properties: Record<string, unknown>; caption: string }
-interface GEdge { id: number; type: string; start: number; end: number; properties: Record<string, unknown> }
 let gNodes: GNode[] = []
 let gEdges: GEdge[] = []
 
 const examples = computed(() => EXAMPLES[dataset.value])
 
-function caption(props: Record<string, unknown>, labels: string[], id: number): string {
-  for (const k of ['name', 'title', 'label', 'code']) if (props[k] != null) return String(props[k])
-  return labels[0] ? `${labels[0]} ${id}` : String(id)
-}
+const toRender = (): RenderGraph => toRenderGraph({ nodes: gNodes, edges: gEdges })
 
-function toRender(): RenderGraph {
-  const index = new Map(gNodes.map((n, i) => [n.id, i]))
-  return {
-    nodes: gNodes.map((n) => ({ id: n.id, label: n.caption, group: n.labels[0] ?? '' })),
-    edges: gEdges.filter((e) => index.has(e.start) && index.has(e.end)).map((e) => ({ source: index.get(e.start)!, target: index.get(e.end)!, label: e.type, group: e.type })),
-  }
-}
-
-/** Every node, relationship and path in a result, collected into the drawn graph. */
+/** Every node, relationship and path in a result becomes the drawn graph; false when there are none. */
 function collect(rowsIn: Row[]): boolean {
-  const nodes = new Map<number, GNode>()
-  const edges = new Map<number, GEdge>()
-  const visit = (v: unknown): void => {
-    if (v === null || typeof v !== 'object') return
-    if (Array.isArray(v)) return v.forEach(visit)
-    const o = v as { kind?: string }
-    if (o.kind === 'node') {
-      const n = v as { id: number; labels: string[]; properties: Record<string, unknown> }
-      nodes.set(n.id, { id: n.id, labels: [...n.labels], properties: n.properties, caption: caption(n.properties, n.labels, n.id) })
-    } else if (o.kind === 'relationship') {
-      const r = v as GEdge
-      edges.set(r.id, { id: r.id, type: r.type, start: r.start, end: r.end, properties: r.properties })
-    } else if (o.kind === 'path') {
-      const p = v as { nodes: unknown[]; relationships: unknown[] }
-      p.nodes.forEach(visit)
-      p.relationships.forEach(visit)
-    } else Object.values(v).forEach(visit)
-  }
-  rowsIn.forEach(visit)
-  if (nodes.size === 0) return false
-  // Relationships whose ends aren't in the result still show, with their ends as plain nodes.
-  for (const e of edges.values()) {
-    for (const id of [e.start, e.end]) if (!nodes.has(id)) nodes.set(id, { id, labels: [], properties: {}, caption: String(id) })
-  }
-  gNodes = [...nodes.values()]
-  gEdges = [...edges.values()]
+  const d = collectRows(rowsIn)
+  if (!d) return false
+  gNodes = d.nodes
+  gEdges = d.edges
   return true
 }
 
@@ -102,11 +71,14 @@ async function loadDataset() {
   selected.value = null
   try {
     const t0 = performance.now()
-    await client.load(DATASETS[dataset.value].make(), { replace: true })
-    const st = await client.stats()
+    const st = await client.dataset(DATASETS[dataset.value].req)
     status.value = `${st.nodes.toLocaleString()} nodes, ${st.relationships.toLocaleString()} relationships, loaded in ${Math.round(performance.now() - t0)} ms`
     await showOverview()
-    query.value = EXAMPLES[dataset.value][0]!.query
+    if (initial !== null) {
+      query.value = initial
+      initial = null
+      runAfterLoad = true
+    } else query.value = EXAMPLES[dataset.value][0]!.query
     columns.value = []
     rows.value = []
     planText.value = ''
@@ -114,6 +86,10 @@ async function loadDataset() {
     error.value = (e as Error).message
   } finally {
     busy.value = false
+  }
+  if (runAfterLoad) {
+    runAfterLoad = false
+    await run()
   }
 }
 
@@ -222,22 +198,6 @@ function pick(ex: { query: string }) {
   run()
 }
 
-function fmt(v: unknown): string {
-  if (v === null || v === undefined) return 'null'
-  if (typeof v !== 'object') return typeof v === 'string' ? v : JSON.stringify(v)
-  const o = v as { kind?: string }
-  if (o.kind === 'node') {
-    const n = v as { id: number; labels: string[]; properties: Record<string, unknown> }
-    return `(${n.labels.map((l) => ':' + l).join('')} ${JSON.stringify(n.properties)})`
-  }
-  if (o.kind === 'relationship') {
-    const r = v as GEdge
-    return `[:${r.type}${Object.keys(r.properties).length ? ' ' + JSON.stringify(r.properties) : ''}]`
-  }
-  if (o.kind === 'path') return `path of ${(v as { relationships: unknown[] }).relationships.length}`
-  return JSON.stringify(v)
-}
-
 watch(mode, (m) => view?.setMode(m))
 watch(labels, (on) => view?.setLabels(on))
 watch(isDark, (d) => view?.setTheme(d ? 'dark' : 'light'))
@@ -271,7 +231,19 @@ onMounted(async () => {
       ? 'The graph view draws with WebGPU, which this browser doesn\'t offer. Queries and tables still work.'
       : `The graph view couldn't start: ${(e as Error).message}`
   }
-  await loadDataset()
+  // A link from an example (Open in the playground): ?dataset=…#q=<code>.
+  const params = new URLSearchParams(location.search)
+  const ds = params.get('dataset')
+  const q = /^#q=([A-Za-z0-9_-]+)$/.exec(location.hash)
+  if (q) {
+    try {
+      initial = decodeCode(q[1]!)
+    } catch {
+      initial = null
+    }
+  }
+  if (ds && ds in DATASETS && ds !== dataset.value) dataset.value = ds as DatasetKey // the watcher loads it
+  else await loadDataset()
 })
 
 const lastPointer = { x: 0, y: 0 }
