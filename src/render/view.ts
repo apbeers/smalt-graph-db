@@ -35,6 +35,7 @@ const LABEL_THROTTLE_MS = 120;
 const ANIM_MS = 450;
 
 interface Pipelines {
+  pick?: boolean;
   node: GPURenderPipeline;
   edge: GPURenderPipeline;
   label?: GPURenderPipeline;
@@ -254,10 +255,12 @@ export class GraphViewImpl implements GraphView {
       label: this.draw2d.label!,
     };
     this.pick2d = {
+      pick: true,
       node: make('vs_node', 'fs_node_pick', true, false, 'always'),
       edge: make('vs_edge', 'fs_edge_pick', true, false, 'always'),
     };
     this.pick3d = {
+      pick: true,
       node: make('vs_node', 'fs_node_pick', true, true, 'less'),
       edge: make('vs_edge', 'fs_edge_pick', true, false, 'less'),
     };
@@ -406,6 +409,7 @@ export class GraphViewImpl implements GraphView {
     const gen = this.gen;
     void this.refreshMirror().then(() => {
       this.switching = false;
+      this.requestFrame();
       if (gen !== this.gen || this.destroyed) return;
       const p = this.mirror;
       const spread = Math.max(this.bounds.radius, 20) * 0.6;
@@ -432,6 +436,7 @@ export class GraphViewImpl implements GraphView {
   }
 
   highlight(indices: number[] | null): void {
+    this.focused = -1;
     this.hl.fill(0);
     this.hlList = [];
     this.hlActive = indices !== null;
@@ -505,10 +510,30 @@ export class GraphViewImpl implements GraphView {
   }
 
   stats(): GraphViewStats {
+    // Frames per second over the frames drawn in the last few seconds (0 when idle). With a
+    // single recent frame, the interval to the frame before it.
     const now = performance.now();
-    let frames = 0;
-    for (const t of this.frameTimes) if (t > 0 && now - t <= 1000) frames++;
-    return { nodes: this.n, edges: this.m, fps: frames, layoutMsPerTick: this.lay.msPerTick };
+    const ring = this.frameTimes, len = ring.length;
+    const newest = ring[(this.frameHead + len - 1) % len]!;
+    let fps = 0;
+    if (newest > 0 && now - newest <= 3000) {
+      let count = 1, oldest = newest;
+      for (let k = 2; k <= len; k++) {
+        const t = ring[(this.frameHead + len - k) % len]!;
+        if (t <= 0) break;
+        if (now - t > 3000) {
+          if (count === 1) {
+            count = 2;
+            oldest = t;
+          }
+          break;
+        }
+        count++;
+        oldest = t;
+      }
+      if (count >= 2 && newest > oldest) fps = ((count - 1) * 1000) / (newest - oldest);
+    }
+    return { nodes: this.n, edges: this.m, fps: Math.round(fps * 10) / 10, layoutMsPerTick: this.lay.msPerTick };
   }
 
   resize(): void {
@@ -959,8 +984,9 @@ export class GraphViewImpl implements GraphView {
   }
 
   private encodeScene(pass: GPURenderPassEncoder, p: Pipelines): void {
-    // 2D: edges under nodes. 3D: nodes first so that edges are depth-tested against them.
-    const nodesFirst = this.mode === '3d';
+    // 2D: edges under nodes. 3D: nodes first so that edges are depth-tested against them, except
+    // when picking, where nodes are drawn last so that a node wins over an edge in front of it.
+    const nodesFirst = this.mode === '3d' && !p.pick;
     if (nodesFirst && this.n > 0) {
       pass.setPipeline(p.node);
       pass.draw(6, this.n);

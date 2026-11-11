@@ -372,19 +372,26 @@ async function main() {
         const t0 = performance.now();
         await window.waitFrames(5);
         let maxFps = 0;
+        // Layout cost and frame rate while the layout runs (SwiftShader is a CPU rasterizer, so
+        // these are far below a hardware GPU).
+        let msPerTick = 0;
         while (performance.now() - t0 < 20000) {
-          await window.waitFrames(5);
-          maxFps = Math.max(maxFps, view.stats().fps);
+          await window.waitFrames(2);
+          const st = view.stats();
+          maxFps = Math.max(maxFps, st.fps);
+          if (st.layoutMsPerTick > 0) msPerTick = st.layoutMsPerTick;
         }
+        const running = view.layout.running;
         view.layout.stop();
         const pos = await view.positions();
         let finite = true;
         for (const v of pos) if (!Number.isFinite(v)) finite = false;
         view.fit();
         await window.waitFrames(30);
-        return { stats: view.stats(), maxFps, finite };
+        return { stats: view.stats(), maxFps, finite, msPerTick, running };
       });
-      console.log(`  ${big.stats.layoutMsPerTick.toFixed(1)} ms/tick; ${big.maxFps} fps while laying out`);
+      console.log(`  ${big.msPerTick.toFixed(1)} ms/tick; ${big.maxFps} fps while laying out`);
+      check(big.running && big.msPerTick > 0, '10k layout runs on the GPU');
       check(big.finite, '10k positions are finite');
       await page.locator('canvas').screenshot({ path: join(shots, 'render-10k-2d.png') });
     }

@@ -97,6 +97,7 @@ export class GpuLayout {
 
   /** Upload a graph: positions are stride-4 (xyzw), velocities reset. */
   setGraph(n: number, positions: Float32Array, csr: Csr): void {
+    if (n !== this.n) this.msPerTick = 0;
     this.n = n;
     this.pos.ensure(n);
     this.next.ensure(n);

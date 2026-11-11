@@ -40,10 +40,11 @@ smaltdb's pager on OPFS, as a store, so commits, the write-ahead log and recover
 
 ## Open
 
-- **Brand.** smaltcy needs its place in smalt-brand: a mark, a product colour, a tagline and a positioning line. The
-  site uses a text wordmark and a placeholder icon until then. Proposed for the brand round: tagline
-  "Small. Alternative. Connected.", positioning "A graph database for the browser that speaks Cypher."
-- **smaltworks.dev** gets smaltcy's status and product page in a smalt-brand PR once the brand is settled.
+- **Brand** (owner, 2026-11-11): tagline "Small. Alternative. Connected." and positioning "A graph database for the
+  browser that speaks Cypher." The site uses a text wordmark and a placeholder icon until smalt-brand draws the mark
+  and picks a product colour.
+- **smaltworks.dev** (owner, 2026-11-11): the repository moves under `stenhoor` first; smaltcy is then added to the
+  website (its status and product page) by a smalt-brand pull request.
 - **The hybrid with smaltdb:** which store comes first (graph tables in smaltdb behind `GraphStore`, or lowering
   graph plans to relational plans), decided with smaltdb's ADR 0028.
 
