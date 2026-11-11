@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "paths": {
+      "@smaltworks/smaltcy": ["./src/index.ts"],
+      "@smaltworks/smaltcy/engine": ["./src/engine/index.ts"],
+      "@smaltworks/smaltcy/plan": ["./src/plan/index.ts"],
+      "@smaltworks/smaltcy/cypher": ["./src/cypher/index.ts"],
+      "@smaltworks/smaltcy/render": ["./src/render/index.ts"],
+      "@smaltworks/smaltcy/datasets": ["./src/datasets/index.ts"]
+    }
+  },
+  "include": ["src", "test", "bench", "scripts/*.ts"]
+}
