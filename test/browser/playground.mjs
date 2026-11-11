@@ -35,7 +35,8 @@ const server = http.createServer((req, res) => {
   createReadStream(p).pipe(res);
 });
 await new Promise((r) => server.listen(0, r));
-const url = `http://localhost:${server.address().port}${BASE}playground`;
+const site = `http://localhost:${server.address().port}${BASE}`;
+const url = `${site}playground`;
 
 let failures = 0;
 const check = (cond, msg) => {
@@ -103,6 +104,56 @@ try {
   await page.screenshot({ path: join(shots, 'playground-dark.png') });
 
   }
+
+  // Runnable examples in the docs: Run shows a table and draws the graph.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(`${site}guide/sample-data`);
+  const examples = page.locator('.cy-run');
+  check((await examples.count()) >= 10, `the sample-data page has runnable examples (${await examples.count()})`);
+  const first = examples.first();
+  await first.locator('[data-run="run"]').click();
+  await first.locator('.cy-run-table').waitFor({ timeout: 30000 });
+  await first.locator('.cy-run-graph-bar span:not(:empty)').waitFor({ timeout: 15000 });
+  check((await first.locator('.cy-run-graph-bar span').textContent()).includes('nodes'), `an example draws its graph (${await first.locator('.cy-run-graph-bar span').textContent()})`);
+  check((await first.locator('.cy-run-graph .cy-run-note').count()) === 0, 'the example\'s graph view started');
+  await page.waitForTimeout(1500);
+  await first.screenshot({ path: join(shots, 'example-social.png') });
+  // An example on another dataset, edited.
+  const metro = page.locator('.cy-run[data-dataset="metro"]').nth(1);
+  await metro.scrollIntoViewIfNeeded();
+  await metro.locator('[data-run="edit"]').click();
+  await metro.locator('[data-run="run"]').click();
+  await metro.locator('.cy-run-graph-bar span:not(:empty)').waitFor({ timeout: 30000 });
+  check(/^\d+ rows? ·/.test(await metro.locator('.cy-run-status').textContent()), `a metro example runs (${await metro.locator('.cy-run-status').textContent()})`);
+  await page.waitForTimeout(1500);
+  await metro.screenshot({ path: join(shots, 'example-metro.png') });
+  // Open in the playground: the example's query and dataset.
+  const href = await metro.locator('[data-run="open"]').getAttribute('href');
+  await page.goto(new URL(href, site).href);
+  await page.waitForFunction(() => /row/.test(document.querySelector('.pg-status')?.textContent ?? ''), null, { timeout: 30000 });
+  check((await page.inputValue('.pg-field select')) === 'metro' && (await page.inputValue('.pg-editor textarea')).includes('shortestPath'), 'Open in the playground brings the query and its dataset');
+
+  // The tech demo.
+  await page.goto(`${site}demo`);
+  const people = QUICK ? '10000' : '25000';
+  await page.waitForFunction(() => /^[\d,]+$/.test(document.querySelector('.td-nums b')?.textContent ?? '') && document.querySelector('.td-nums b')?.textContent !== '0', null, { timeout: 60000 });
+  if (QUICK) {
+    await page.selectOption('.td-field select >> nth=0', '10000');
+    await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 60000 });
+  }
+  const nodes = await page.textContent('.td-nums b');
+  check(nodes === (QUICK ? '10,008' : '25,008'), `the demo draws ${people} people (${nodes} nodes)`);
+  await page.click('.td-chip:has-text("Two hops from Bo 1")');
+  await page.waitForSelector('.td-highlight', { timeout: 30000 });
+  check(/\d+ nodes? highlighted/.test(await page.textContent('.td-highlight')), `a query highlights its result (${await page.textContent('.td-highlight')})`);
+  await page.click('.td-chip:has-text("Bo 1")');
+  await page.waitForFunction(() => /match/.test(document.querySelector('.td-highlight')?.textContent ?? ''));
+  check(/"Bo 1": \d+ match/.test(await page.textContent('.td-highlight')), `a search highlights matches (${await page.textContent('.td-highlight')})`);
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: join(shots, 'demo-2d.png') });
+  await page.click('.td-seg button:has-text("3D")');
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: join(shots, 'demo-3d.png') });
 
   check(errors.length === 0, `no console or page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
   console.log(`screenshots in ${shots}`);

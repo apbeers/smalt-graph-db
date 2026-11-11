@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { smaltLight, smaltDark } from './theme/shiki'
 import { smaltworksMenu, smaltworksFooter } from './theme/smaltworks'
+import { runnablePlugin } from './theme/runnable'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const REPO = 'https://github.com/apbeers/smalt-graph-db'
@@ -35,6 +36,8 @@ export default defineConfig({
     theme: { light: smaltLight, dark: smaltDark },
     languageAlias: { cypher: 'sql' },
     config(md) {
+      // Every cypher example runs where it stands (theme/runnable.ts).
+      md.use(runnablePlugin)
       // Links that leave docs/ point at the file on GitHub.
       const fallback = md.renderer.rules.link_open ?? ((t, i, o, _e, s) => s.renderToken(t, i, o))
       md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
@@ -55,6 +58,7 @@ export default defineConfig({
     siteTitle: false,
     nav: [
       { text: 'Playground', link: '/playground' },
+      { text: 'Demo', link: '/demo' },
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Cypher', link: '/reference/cypher' },
       { text: 'Engine', link: '/reference/plans' },
@@ -74,6 +78,8 @@ export default defineConfig({
         items: [
           { text: 'Getting started', link: '/guide/getting-started' },
           { text: 'Examples', link: '/guide/examples' },
+          { text: 'Sample data', link: '/guide/sample-data' },
+          { text: 'Tech demo: big graphs', link: '/demo' },
           { text: 'Drawing graphs', link: '/guide/rendering' },
           { text: 'In a Web Worker', link: '/guide/worker' },
           { text: 'Saving and loading', link: '/guide/persistence' },

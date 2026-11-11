@@ -4,7 +4,7 @@
 import type { GraphJSON } from '../engine/io.js';
 import { SmaltcyError, type ErrorCode } from '../errors.js';
 import type { CypherResult } from '../index.js';
-import type { GraphStats, Overview, Request, Response } from './protocol.js';
+import type { DatasetLoaded, DatasetRequest, GraphStats, Overview, Request, Response } from './protocol.js';
 
 type Body = Request extends infer R ? (R extends { id: number } ? Omit<R, 'id'> : never) : never;
 
@@ -33,8 +33,13 @@ export class GraphClient {
     });
   }
 
-  run(cypher: string, params?: Record<string, unknown>): Promise<CypherResult> {
-    return this.send({ type: 'run', cypher, params });
+  /** Runs Cypher; with `options.dataset`, on that sample dataset as generated. */
+  run(cypher: string, params?: Record<string, unknown>, options: { dataset?: DatasetRequest } = {}): Promise<CypherResult> {
+    return this.send({ type: 'run', cypher, params, dataset: options.dataset });
+  }
+  /** Replaces the graph with a sample dataset, generated in the worker. */
+  dataset(dataset: DatasetRequest): Promise<DatasetLoaded> {
+    return this.send({ type: 'dataset', dataset });
   }
   load(data: GraphJSON, options: { replace?: boolean } = {}): Promise<void> {
     return this.send({ type: 'load', data, replace: options.replace });
@@ -45,8 +50,9 @@ export class GraphClient {
   stats(): Promise<GraphStats> {
     return this.send({ type: 'stats' });
   }
-  overview(limit?: number): Promise<Overview> {
-    return this.send({ type: 'overview', limit });
+  /** The graph as flat arrays, ready to draw; `groupKey` adds each node's value of that property. */
+  overview(limit?: number, options: { groupKey?: string } = {}): Promise<Overview> {
+    return this.send({ type: 'overview', limit, groupKey: options.groupKey });
   }
   close(): void {
     this.worker.terminate();

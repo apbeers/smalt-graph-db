@@ -9,6 +9,9 @@ hero:
       text: Open the playground
       link: /playground
     - theme: alt
+      text: Tech demo
+      link: /demo
+    - theme: alt
       text: Get started
       link: /guide/getting-started
     - theme: alt

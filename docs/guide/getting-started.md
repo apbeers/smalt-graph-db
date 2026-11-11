@@ -1,6 +1,7 @@
 # Getting started
 
-smaltcy is a graph database that runs in the page. You store nodes and relationships, each with labels or a type
+smaltcy is a graph database that runs in the page. Every example in these docs runs where it stands: press **Run**
+under one to see its result, drawn as a graph when it has nodes or relationships ([sample data](./sample-data)). You store nodes and relationships, each with labels or a type
 and properties, and you query them with Cypher.
 
 ## Install
@@ -35,7 +36,7 @@ const rows = db.query('MATCH (a:Person)-[k:KNOWS]->(b) RETURN a.name AS a, b.nam
 
 Pass values with `$name`, never by building strings:
 
-```cypher
+```cypher noplay
 MATCH (p:Person) WHERE p.born > $year RETURN p.name
 ```
 

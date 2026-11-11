@@ -233,6 +233,13 @@ export function boundsOf(pos: Float32Array, count: number): Bounds {
  * The camera state that frames `b` in a viewport, with `padPx` device pixels of margin and room for
  * nodes of world radius `nodeRadius`. Orientation (yaw/pitch) is kept.
  */
+/**
+ * How close fit() comes: a few nodes keep their natural size instead of filling the view. 2D: the largest zoom;
+ * 3D: the smallest radius framed, in world units (relationships are about 30 long).
+ */
+export const FIT_MAX_ZOOM = 2.5;
+export const FIT_MIN_RADIUS = 90;
+
 export function fitCamera(
   b: Bounds,
   mode: ViewMode,
@@ -249,10 +256,10 @@ export function fitCamera(
   if (mode === '2d') {
     const bw = b.max[0] - b.min[0] + 2 * nodeRadius;
     const bh = b.max[1] - b.min[1] + 2 * nodeRadius;
-    next.zoom = clamp(Math.min(w / Math.max(bw, 1e-6), h / Math.max(bh, 1e-6)), MIN_ZOOM, MAX_ZOOM);
+    next.zoom = clamp(Math.min(w / Math.max(bw, 1e-6), h / Math.max(bh, 1e-6), FIT_MAX_ZOOM), MIN_ZOOM, MAX_ZOOM);
     if (b.count <= 1) next.zoom = clamp(current.zoom, MIN_ZOOM, MAX_ZOOM);
   } else {
-    const r = Math.max(b.radius + nodeRadius, 1);
+    const r = Math.max(b.radius + nodeRadius, FIT_MIN_RADIUS);
     const halfY = Math.atan(Math.tan(FOV_Y / 2) * (h / height));
     const halfX = Math.atan(Math.tan(FOV_Y / 2) * (w / height));
     next.distance = r / Math.sin(Math.min(halfX, halfY));

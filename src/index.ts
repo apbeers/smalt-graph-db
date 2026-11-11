@@ -86,7 +86,7 @@ export function open(options: OpenOptions = {}): Graph {
 export { compile } from './cypher/index.js';
 export type { GraphJSON } from './engine/io.js';
 export { connect, GraphClient } from './worker/client.js';
-export type { GraphStats, Overview } from './worker/protocol.js';
+export type { DatasetLoaded, DatasetRequest, GraphStats, Overview } from './worker/protocol.js';
 export { records, type Params, type Result } from './engine/database.js';
 export { MemoryStore, CsrStore, type GraphStore } from './store/index.js';
 export { SmaltcyError, type ErrorCode } from './errors.js';

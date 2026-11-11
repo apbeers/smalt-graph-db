@@ -4,8 +4,13 @@ import { describe, expect, test } from 'vitest';
 import { EXAMPLES, type DatasetKey } from '../docs/.vitepress/theme/components/examples.js';
 import { family, metro, network, social } from '../src/datasets/index.js';
 import { open } from '../src/index.js';
+import { datasetOf, type DatasetName } from '../docs/.vitepress/theme/runnable.js';
 
-/** Every ```cypher block in the docs runs against the sample social graph, on a fresh copy each. */
+/**
+ * Every ```cypher block in the docs runs on the dataset the site runs it on (its fence's `dataset=`, else the page's
+ * front matter, else `social`; theme/runnable.ts), on a fresh copy each, and must give rows or write something.
+ * Blocks marked `noplay` run on `social` with the parameters below.
+ */
 function markdown(dir: string): string[] {
   return readdirSync(dir).flatMap((f) => {
     const p = join(dir, f);
@@ -14,18 +19,26 @@ function markdown(dir: string): string[] {
   });
 }
 
-const blocks: [string, string][] = [];
+const blocks: [string, string, DatasetName | null][] = [];
 for (const file of markdown('docs')) {
   const text = readFileSync(file, 'utf8');
-  for (const m of text.matchAll(/```cypher\n([\s\S]*?)```/g)) blocks.push([`${file}: ${m[1]!.split('\n')[0]}`, m[1]!]);
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? '';
+  const frontmatter = { dataset: /^dataset:\s*(\S+)/m.exec(fm)?.[1] };
+  for (const m of text.matchAll(/```cypher([^\n]*)\n([\s\S]*?)```/g)) {
+    blocks.push([`${file}: ${m[2]!.split('\n')[0]}`, m[2]!, datasetOf(`cypher${m[1]}`, frontmatter)]);
+  }
 }
+
+const DATA: Record<DatasetName, () => ReturnType<typeof social>> = { social, family, metro, network: () => network(2000) };
 
 describe('docs examples', () => {
   test('there are examples', () => expect(blocks.length).toBeGreaterThan(20));
-  test.each(blocks)('%s', (_where, cypher) => {
+  test.each(blocks)('%s', (_where, cypher, dataset) => {
     const g = open();
-    g.load(social());
-    expect(() => g.run(cypher, { year: 1900 })).not.toThrow();
+    g.load(DATA[dataset ?? 'social']());
+    const r = g.run(cypher, dataset ? {} : { year: 1900 });
+    // A runnable example shows something: rows, a plan or what it wrote.
+    if (dataset && !/^\s*(CREATE|DROP) INDEX/i.test(cypher)) expect(r.rows.length + Object.values(r.counts).reduce((a, b) => a + b, 0), cypher).toBeGreaterThan(0);
   });
 });
 

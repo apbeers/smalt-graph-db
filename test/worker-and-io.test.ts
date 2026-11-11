@@ -63,3 +63,25 @@ describe('worker handler', () => {
     expect(() => structuredClone(r)).not.toThrow();
   });
 });
+
+describe('sample datasets in the worker', () => {
+  test('a run on a dataset starts from it as generated', () => {
+    const h = createHandler();
+    const social = { name: 'social' } as const;
+    const count = () => h.handle({ id: 0, type: 'run', cypher: 'MATCH (p:Person) RETURN count(p) AS c', dataset: social });
+    expect(count()).toMatchObject({ ok: true, result: { rows: [[12]] } });
+    // A write changes the graph: the next run on the dataset loads it again.
+    h.handle({ id: 1, type: 'run', cypher: "CREATE (:Person {name: 'New'})", dataset: social });
+    expect(count()).toMatchObject({ result: { rows: [[12]] } });
+    // Unchanged, it is kept.
+    expect(h.handle({ id: 2, type: 'dataset', dataset: social })).toMatchObject({ ok: true, result: { reused: true, nodes: 22 } });
+  });
+
+  test('sizes and stores', () => {
+    const h = createHandler();
+    const r = h.handle({ id: 1, type: 'dataset', dataset: { name: 'network', size: 300, store: 'csr' } });
+    expect(r).toMatchObject({ ok: true, result: { reused: false, nodes: 308 } });
+    expect(h.graph.store.name).toBe('csr');
+    expect(h.handle({ id: 2, type: 'run', cypher: 'CREATE (:X)' })).toMatchObject({ ok: false, error: { code: 'SMALTCY_UNSUPPORTED' } });
+  });
+});

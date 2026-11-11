@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  boundsOf, convertCamera, defaultCamera, fitCamera, lerpCamera, mat4Invert, mat4Multiply, orbit, pan,
+  boundsOf, convertCamera, defaultCamera, fitCamera,
+  FIT_MAX_ZOOM, lerpCamera, mat4Invert, mat4Multiply, orbit, pan,
   project, unproject, viewProjection, zoomAt2d,
 } from '../../src/render/camera.js';
 
@@ -51,16 +52,21 @@ describe('2D camera', () => {
   });
 
   it('fits bounds with padding', () => {
-    const pos = new Float32Array([-100, -50, 0, 1, 100, 50, 0, 1]);
+    const pos = new Float32Array([-1000, -500, 0, 1, 1000, 500, 0, 1]);
     const b = boundsOf(pos, 2);
     const s = fitCamera(b, '2d', W, H, 50, 0, defaultCamera());
     const m = vp(s);
-    const a = project(m, W, H, [-100, -50, 0]);
-    const c = project(m, W, H, [100, 50, 0]);
+    const a = project(m, W, H, [-1000, -500, 0]);
+    const c = project(m, W, H, [1000, 500, 0]);
     expect(a.x).toBeCloseTo(50);
     expect(c.x).toBeCloseTo(750);
     expect(a.y).toBeGreaterThanOrEqual(49.9);
     expect(c.y).toBeLessThanOrEqual(550.1);
+  });
+
+  it('does not zoom a small graph in past FIT_MAX_ZOOM', () => {
+    const b = boundsOf(new Float32Array([-10, -5, 0, 1, 10, 5, 0, 1]), 2);
+    expect(fitCamera(b, '2d', W, H, 50, 0, defaultCamera()).zoom).toBe(FIT_MAX_ZOOM);
   });
 });
 
