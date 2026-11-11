@@ -67,7 +67,8 @@ npm ci
 npm run check          # typecheck + tests
 npm run bench          # the stores on a 20,000-person network
 npm run docs:dev       # the site, with the playground
-npm run test:browser   # the GPU renderer in headless Chromium
+npm run test:quick     # check + quick browser tests (about a minute)
+npm run test:browser   # the full browser tests: renderer and playground (about 5 minutes)
 ```
 
 ## Documentation

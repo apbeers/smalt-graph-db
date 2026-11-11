@@ -7,3 +7,4 @@ docs/.vitepress/cache/
 docs/.vitepress/dist/
 .claude/worktrees/
 bench/results/*.local.json
+.vitest/

@@ -2,7 +2,9 @@
 // page over http://localhost (WebGPU needs a secure context) and drives it with Playwright in
 // Chromium with WebGPU enabled (SwiftShader when headless without a GPU).
 //
-//   node test/browser/render/run.mjs [--shots <dir>] [--headed] [--skip-10k]
+//   node test/browser/render/run.mjs [--shots <dir>] [--headed] [--skip-10k] [--quick]
+//
+// --quick lays out 300 nodes instead of 2,000 and skips the 10k run: the same checks in a fraction of the time.
 //
 // Fails on any GPU validation error, device loss, page error or console error.
 import { createRequire } from 'node:module';
@@ -23,6 +25,13 @@ const opt = (name, def) => {
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : def;
 };
+const QUICK = flag('--quick');
+const N = QUICK ? 300 : 2000;
+const E = QUICK ? 600 : 4000;
+// The layout's cooling: quick mode settles in 100 ticks instead of the default 300.
+const TICKS = QUICK ? 100 : undefined;
+// A search that matches City nodes at either size (makeGraph labels them `City <index>`).
+const SEARCH = QUICK ? 'city 9' : 'city 6';
 const shots = resolve(opt('--shots', process.env.RENDER_SHOTS ?? join(tmpdir(), 'smaltcy-render-shots')));
 
 let failures = 0;
@@ -155,12 +164,13 @@ async function main() {
     });
 
     // ---- 2k nodes, 2D -------------------------------------------------------------------------
-    console.log('2D, 2,000 nodes / 4,000 edges');
+    console.log(`2D, ${N.toLocaleString()} nodes / ${E.toLocaleString()} edges`);
+    await page.evaluate(([n, e, t, q]) => Object.assign(window, { __N: n, __E: e, __TICKS: t, __SEARCH: q }), [N, E, TICKS, SEARCH]);
     const r2 = await page.evaluate(async () => {
       const canvas = document.getElementById('c');
-      const view = await window.R.createGraphView(canvas, { mode: '2d', theme: 'light' });
+      const view = await window.R.createGraphView(canvas, { mode: '2d', theme: 'light', layoutTicks: window.__TICKS });
       window.view = view;
-      const g = window.makeGraph(2000, 4000);
+      const g = window.makeGraph(window.__N, window.__E);
       window.graph = g;
       view.setGraph(g);
       const before = await view.positions();
@@ -188,7 +198,7 @@ async function main() {
     });
     console.log(`  layout: ${r2.run.settled ? 'settled' : 'not settled'} after ${(r2.run.ms / 1000).toFixed(1)} s; ${r2.run.stats.layoutMsPerTick.toFixed(2)} ms/tick; max fps ${r2.run.maxFps}`);
     console.log(`  mean edge length ${r2.linked.toFixed(1)} vs random pair ${r2.random.toFixed(1)}; extent ${r2.maxAbs.toFixed(0)}`);
-    check(r2.n === 2000, 'positions() returns xyz for every node');
+    check(r2.n === N, 'positions() returns xyz for every node');
     check(r2.finite, 'positions are finite');
     check(r2.maxAbs > 100 && r2.moved > 1, 'positions spread out and moved from the seed');
     check(r2.linked < r2.random * 0.5, 'connected nodes end closer than random pairs');
@@ -198,7 +208,7 @@ async function main() {
     const framed2d = await page.evaluate(async () => {
       window.view.fit();
       await window.waitFrames(30);
-      return window.framed(window.view, 2000);
+      return window.framed(window.view, window.__N);
     });
     check(framed2d === 1, `fit() frames every node in 2D (${(framed2d * 100).toFixed(1)}%)`);
     await page.locator('canvas').screenshot({ path: join(shots, 'render-2d-light.png') });
@@ -208,7 +218,7 @@ async function main() {
       const view = window.view;
       await view.sync();
       const results = [];
-      for (const i of [0, 97, 501, 1234, 1999]) {
+      for (const i of [0, 0.05, 0.25, 0.62, 1].map((f) => Math.round(f * (window.__N - 1)))) {
         const p = view.screenPosition(i);
         const hit = await view.pick(p.x, p.y);
         let near = false;
@@ -247,12 +257,12 @@ async function main() {
 
     // Search + highlight, zoomed in.
     const found = await page.evaluate(async () => {
-      const idx = window.view.search('city 6');
+      const idx = window.view.search(window.__SEARCH);
       window.view.focus(idx[0]);
       await window.waitFrames(40);
       return idx.length;
     });
-    check(found > 0, `search("city 6") matches ${found} nodes`);
+    check(found > 0, `search("${SEARCH}") matches ${found} nodes`);
     await page.locator('canvas').screenshot({ path: join(shots, 'render-2d-search.png') });
 
     // Dark theme.
@@ -281,7 +291,7 @@ async function main() {
       await view.sync();
       const p = view.screenPosition(42);
       const hit = p ? await view.pick(p.x, p.y) : null;
-      const framed = await window.framed(view, 2000);
+      const framed = await window.framed(view, window.__N);
       return { run, zMax, finite, hit, framed };
     });
     check(r3.framed === 1, `fit() frames every node in 3D (${(r3.framed * 100).toFixed(1)}%)`);
@@ -363,7 +373,7 @@ async function main() {
     await page.locator('canvas').screenshot({ path: join(shots, 'render-small-3d.png') });
 
     // ---- 10k nodes / 30k edges ----------------------------------------------------------------
-    if (!flag('--skip-10k')) {
+    if (!flag('--skip-10k') && !QUICK) {
       console.log('2D, 10,000 nodes / 30,000 edges (timed run, not to rest)');
       const big = await page.evaluate(async () => {
         const view = window.view;

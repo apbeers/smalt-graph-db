@@ -33,6 +33,8 @@ export interface GraphViewOptions {
   palette?: string[];
   /** `'transparent'` (default) lets the page show through; `'theme'` clears to the theme background. */
   background?: 'transparent' | 'theme';
+  /** Ticks the layout takes to cool to rest (default 300): fewer settles sooner and less evenly. */
+  layoutTicks?: number;
 }
 
 export interface Hit {

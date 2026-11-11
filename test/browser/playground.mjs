@@ -1,7 +1,9 @@
 // Browser test for the docs site's playground: builds the site, serves it, and drives the playground in Chromium
 // with WebGPU. Fails on any page error, console error or GPU error, or if a query doesn't draw.
 //
-//   node test/browser/playground.mjs [--shots <dir>]
+//   node test/browser/playground.mjs [--shots <dir>] [--quick]
+//
+// --quick skips the 5,000-person network and the dark-theme screenshot.
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { createReadStream, existsSync, mkdirSync, statSync } from 'node:fs';
@@ -15,6 +17,7 @@ const { chromium } = require('playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
 const shots = resolve(argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : join(tmpdir(), 'smaltcy-playground-shots'));
+const QUICK = argv.includes('--quick');
 const BASE = '/smalt-graph-db/';
 mkdirSync(shots, { recursive: true });
 
@@ -84,6 +87,7 @@ try {
   await page.waitForSelector('.pg-status.err');
   check(((await page.textContent('.pg-status')) ?? '').includes('line 1'), 'syntax errors show their position');
 
+  if (!QUICK) {
   // The larger network.
   await page.click('.pg-seg button:has-text("2D")');
   await page.selectOption('.pg-field select', 'network');
@@ -97,6 +101,8 @@ try {
   await page.evaluate(() => document.documentElement.classList.add('dark'));
   await page.waitForTimeout(1500);
   await page.screenshot({ path: join(shots, 'playground-dark.png') });
+
+  }
 
   check(errors.length === 0, `no console or page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
   console.log(`screenshots in ${shots}`);

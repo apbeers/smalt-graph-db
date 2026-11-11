@@ -56,6 +56,9 @@ memory; sampled above 20,480 nodes), relationships pull their ends together, and
 centre. The layout cools and stops by itself, and the view draws only when something changes, so a settled graph
 costs no GPU time.
 
+The `layoutTicks` option sets how many ticks the layout takes to cool (default 300). Fewer settle sooner and less
+evenly: `createGraphView(canvas, { layoutTicks: 100 })`.
+
 ## From query results
 
 The playground collects every node, relationship and path in a result and draws them. The same in a few lines:

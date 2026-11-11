@@ -16,7 +16,7 @@ import { nextCapacity } from './growth.js';
 import { InputController } from './input.js';
 import type { InputHost } from './input.js';
 import { ALL_LABELS_BELOW, GlyphAtlas, LABEL_CAP, MAX_LABEL_CHARS, buildGlyphInstances, chooseLabels, shouldShowAll } from './labels.js';
-import { GpuLayout } from './layout.js';
+import { GpuLayout, decayForTicks } from './layout.js';
 import { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT, GroupColors, THEMES, packRgba8, parseColor } from './palette.js';
 import type { Rgba } from './palette.js';
 import { PICK_FORMAT, Picker } from './picking.js';
@@ -189,6 +189,7 @@ export class GraphViewImpl implements GraphView {
     const device = this.device;
 
     this.lay = new GpuLayout(device, gpu.timestamps);
+    if (opts.layoutTicks !== undefined) this.lay.settings.alphaDecay = decayForTicks(opts.layoutTicks);
     this.lay.dims = this.mode === '2d' ? 2 : 3;
     const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
     this.styleBuf = new GrowableBuffer(device, 'render.styles', S, 16);

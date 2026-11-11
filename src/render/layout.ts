@@ -21,6 +21,11 @@ export interface LayoutSettings {
   alphaDecay: number;
 }
 
+/** The alphaDecay that cools from 1 to alphaMin (0.001) in `ticks` ticks. */
+export function decayForTicks(ticks: number): number {
+  return 1 - Math.pow(0.001, 1 / Math.max(1, ticks));
+}
+
 export const DEFAULT_LAYOUT: LayoutSettings = {
   charge: 30,
   linkDistance: 30,
@@ -28,7 +33,7 @@ export const DEFAULT_LAYOUT: LayoutSettings = {
   gravity: 0.04,
   decay: 0.4,
   alphaMin: 0.001,
-  alphaDecay: 1 - Math.pow(0.001, 1 / 300),
+  alphaDecay: decayForTicks(300),
 };
 
 /** How many repulsion tiles a tick visits and the scale that compensates for the sample. */

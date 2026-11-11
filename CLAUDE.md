@@ -16,7 +16,8 @@ badges unchanged from the family. smaltcy has no mark or product colour yet (ADR
 | --- | --- |
 | `npm ci` | Installs dependencies |
 | `npm run check` | Typecheck, then the tests (vitest). Before every commit |
-| `npm run test:browser` | The renderer in headless Chromium with WebGPU (SwiftShader). Changes to `src/render/` |
+| `npm run test:browser` | The renderer and the playground in headless Chromium with WebGPU (SwiftShader), about 5 minutes. What CI runs |
+| `npm run test:quick` | `check`, then the browser tests with `--quick` (smaller graphs, fewer steps), about a minute. While working on `src/render/` or the playground |
 | `npm run bench` | The stores on a generated network; compare with docs/research/benchmarks.md |
 | `npm run docs:dev` / `docs:build` | The site with the playground |
 | `npm run build` | `dist/` and type declarations |
