@@ -46,8 +46,17 @@ try {
 | `stats()` | Nodes, edges, frames per second and layout time per tick |
 | `destroy()` | Frees the GPU resources |
 
-In 2D, drag the background to pan, scroll to zoom and drag a node to move it. In 3D, drag to orbit, shift-drag or
-right-drag to pan, scroll to move closer, and drag a node to move it in the plane facing you.
+Moving around:
+
+| | Mouse and keyboard | Touch |
+| --- | --- | --- |
+| Pan | 2D: drag the background. Both modes: Shift-drag, right- or middle-drag, or hold Space and drag | Two fingers (2D: one finger too) |
+| Zoom | Scroll | Pinch with two fingers |
+| Tilt and turn (3D) | Drag | One finger |
+| Move a node | Drag it | Drag it |
+| Keyboard | With the canvas focused: arrow keys pan (Shift: further), `+` and `-` zoom | |
+
+Panning with a modifier or two fingers moves the camera even over a node.
 
 ## The layout
 

@@ -10,7 +10,7 @@
 // test/docs-examples.test.ts runs every example on the dataset this plugin gives it.
 import type { GraphClient } from '../../../src/worker/client'
 import type { GraphView } from '../../../src/render/index'
-import { collect, encodeCode, fmt, toRender } from './graph-results'
+import { collect, controlsHint, encodeCode, fmt, toRender } from './graph-results'
 
 export const DATASETS = ['social', 'family', 'metro', 'network'] as const
 export type DatasetName = (typeof DATASETS)[number]
@@ -174,7 +174,14 @@ export function enableRunnable(base: string, doc: Document = document): void {
     const bar = doc.createElement('div')
     bar.className = 'cy-run-graph-bar'
     bar.innerHTML = `<button type="button" data-mode="2d" class="on">2D</button><button type="button" data-mode="3d">3D</button><button type="button" data-fit>Fit</button><span></span>`
-    panel.append(canvas, bar)
+    const hint = doc.createElement('div')
+    hint.className = 'cy-run-hint'
+    const setHint = (mode: '2d' | '3d') => {
+      const h = controlsHint(mode)
+      hint.innerHTML = `<span class="gc-mouse">${h.mouse}</span><span class="gc-touch">${h.touch}</span>`
+    }
+    setHint('2d')
+    panel.append(canvas, bar, hint)
     host.append(panel)
     try {
       const { createGraphView } = await import('../../../src/render/index')
@@ -195,6 +202,7 @@ export function enableRunnable(base: string, doc: Document = document): void {
         if (b.hasAttribute('data-fit')) return view.fit()
         const mode = b.getAttribute('data-mode') as '2d' | '3d'
         view.setMode(mode)
+        setHint(mode)
         bar.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === b))
       })
     } catch (e) {

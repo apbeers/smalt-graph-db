@@ -135,14 +135,14 @@ try {
 
   // The tech demo.
   await page.goto(`${site}demo`);
-  const people = QUICK ? '10000' : '25000';
-  await page.waitForFunction(() => /^[\d,]+$/.test(document.querySelector('.td-nums b')?.textContent ?? '') && document.querySelector('.td-nums b')?.textContent !== '0', null, { timeout: 60000 });
-  if (QUICK) {
-    await page.selectOption('.td-field select >> nth=0', '10000');
-    await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 60000 });
+  // 10,000 people by default; the full run also switches to 25,000.
+  await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 60000 });
+  check(true, 'the demo draws 10,000 people by default (10,008 nodes)');
+  if (!QUICK) {
+    await page.selectOption('.td-field select >> nth=0', '25000');
+    await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '25,008', null, { timeout: 120000 });
+    check(true, 'the demo switches to 25,000 people (25,008 nodes)');
   }
-  const nodes = await page.textContent('.td-nums b');
-  check(nodes === (QUICK ? '10,008' : '25,008'), `the demo draws ${people} people (${nodes} nodes)`);
   await page.click('.td-chip:has-text("Two hops from Bo 1")');
   await page.waitForSelector('.td-highlight', { timeout: 30000 });
   check(/\d+ nodes? highlighted/.test(await page.textContent('.td-highlight')), `a query highlights its result (${await page.textContent('.td-highlight')})`);

@@ -1,7 +1,14 @@
 /**
- * Pointer and wheel input. 2D: drag the background to pan, drag a node to move it, wheel or pinch to
- * zoom at the cursor. 3D: drag to orbit, right-drag or shift-drag to pan, wheel or pinch to dolly,
- * drag a node to move it in the plane facing the camera. A press that does not move is a click.
+ * Pointer, wheel and keyboard input.
+ *
+ * - 2D: drag the background to pan, drag a node to move it, wheel or pinch to zoom at the cursor.
+ * - 3D: drag to orbit (tilt and turn), drag a node to move it in the plane facing the camera, wheel or
+ *   pinch to dolly.
+ * - Pan in either mode: two fingers (moving together, while pinching zooms), or drag with Shift, the
+ *   right or middle button, or Space held. These pan over a node too, instead of dragging it.
+ * - Keyboard, with the canvas focused: arrow keys pan (Shift: further), + and - zoom.
+ *
+ * A press that does not move is a click.
  */
 import type { Hit, ViewMode } from './types.js';
 
@@ -27,17 +34,25 @@ export interface InputHost {
 
 type Gesture =
   | { kind: 'none' }
-  | { kind: 'pending'; id: number; x: number; y: number; button: number; shift: boolean; moved: boolean }
+  /** `pan`: the press asked to pan (Shift, right or middle button, or Space held). */
+  | { kind: 'pending'; id: number; x: number; y: number; button: number; pan: boolean; moved: boolean }
   | { kind: 'camera'; id: number; x: number; y: number; orbit: boolean; moved: boolean; sx: number; sy: number }
   | { kind: 'node'; id: number; node: number; moved: boolean; sx: number; sy: number }
   | { kind: 'pinch' };
 
 const CLICK_SLOP = 4;
+/** CSS pixels an arrow key pans by (Shift: four times as far). */
+const KEY_PAN = 40;
+const KEY_ZOOM = 1.25;
 
 export class InputController {
   private gesture: Gesture = { kind: 'none' };
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private pinchDist = 0;
+  private pinchMid = { x: 0, y: 0 };
+  /** Space is held while the pointer is over the canvas: drags pan. */
+  private space = false;
+  private inside = false;
   private readonly abort = new AbortController();
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly host: InputHost) {
@@ -50,7 +65,48 @@ export class InputController {
     canvas.addEventListener('pointerleave', this.leave, o);
     canvas.addEventListener('wheel', this.wheel, { signal: this.abort.signal, passive: false });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault(), o);
+    canvas.addEventListener('pointerenter', () => (this.inside = true), o);
+    canvas.addEventListener('keydown', this.key, o);
+    // The canvas takes focus, for the keyboard, unless the page gave it a tabindex of its own.
+    if (!canvas.hasAttribute('tabindex')) canvas.tabIndex = 0;
+    const doc = canvas.ownerDocument;
+    doc.addEventListener('keydown', this.spaceDown, o);
+    doc.addEventListener('keyup', this.spaceUp, o);
+    doc.defaultView?.addEventListener('blur', () => (this.space = false), o);
   }
+
+  private readonly spaceDown = (e: KeyboardEvent) => {
+    if (e.code !== 'Space' || !this.inside) return;
+    const t = e.target as HTMLElement | null;
+    // Space still types in text fields.
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName))) return;
+    e.preventDefault(); // the page doesn't scroll
+    this.space = true;
+  };
+
+  private readonly spaceUp = (e: KeyboardEvent) => {
+    if (e.code === 'Space') this.space = false;
+  };
+
+  private readonly key = (e: KeyboardEvent) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const k = this.host.scale() * KEY_PAN * (e.shiftKey ? 4 : 1);
+    const pans: Record<string, [number, number]> = { ArrowLeft: [k, 0], ArrowRight: [-k, 0], ArrowUp: [0, k], ArrowDown: [0, -k] };
+    const r = this.canvas.getBoundingClientRect();
+    const s = this.host.scale();
+    const mid = { x: (r.width / 2) * s, y: (r.height / 2) * s };
+    if (pans[e.key]) {
+      this.host.interacted();
+      this.host.pan(...pans[e.key]!);
+    } else if (e.key === '+' || e.key === '=') {
+      this.host.interacted();
+      this.host.zoomAt(mid.x, mid.y, KEY_ZOOM);
+    } else if (e.key === '-' || e.key === '_') {
+      this.host.interacted();
+      this.host.zoomAt(mid.x, mid.y, 1 / KEY_ZOOM);
+    } else return;
+    e.preventDefault();
+  };
 
   private at(e: PointerEvent | WheelEvent): { x: number; y: number } {
     const r = this.canvas.getBoundingClientRect();
@@ -70,11 +126,15 @@ export class InputController {
       if (this.gesture.kind === 'node') this.host.dragEnd();
       this.gesture = { kind: 'pinch' };
       this.pinchDist = this.pinchDistance();
+      this.pinchMid = this.pinchCentre();
       return;
     }
     if (this.pointers.size > 2) return;
-    const g = { kind: 'pending' as const, id: e.pointerId, x: p.x, y: p.y, button: e.button, shift: e.shiftKey, moved: false };
+    const pan = e.shiftKey || e.button === 1 || e.button === 2 || this.space;
+    const g = { kind: 'pending' as const, id: e.pointerId, x: p.x, y: p.y, button: e.button, pan, moved: false };
     this.gesture = g;
+    // A press that pans never drags a node: no need to ask the GPU what's under it.
+    if (pan) return this.decide(g, null);
     const last = this.host.lastHover();
     const near = Math.hypot(last.x - p.x, last.y - p.y) < 2 * this.host.scale();
     if (e.pointerType === 'mouse' && near) this.decide(g, last.hit);
@@ -83,13 +143,13 @@ export class InputController {
 
   private decide(g: Extract<Gesture, { kind: 'pending' }>, hit: Hit | null): void {
     const cur = this.pointers.get(g.id) ?? { x: g.x, y: g.y };
-    if (hit?.kind === 'node' && g.button === 0 && !g.shift) {
+    if (hit?.kind === 'node' && g.button === 0 && !g.pan) {
       this.gesture = { kind: 'node', id: g.id, node: hit.index, moved: g.moved, sx: g.x, sy: g.y };
       this.host.dragStart(hit.index, cur.x, cur.y);
       if (g.moved) this.host.dragMove(cur.x, cur.y);
       return;
     }
-    const orbit = this.host.mode() === '3d' && g.button === 0 && !g.shift;
+    const orbit = this.host.mode() === '3d' && g.button === 0 && !g.pan;
     this.gesture = { kind: 'camera', id: g.id, x: g.x, y: g.y, orbit, moved: g.moved, sx: g.x, sy: g.y };
     if (g.moved) this.applyCamera(this.gesture, cur.x, cur.y);
   }
@@ -126,13 +186,17 @@ export class InputController {
         if (g.moved) this.host.dragMove(p.x, p.y);
         return;
       case 'pinch': {
+        // Two fingers: the midpoint moving pans, the distance changing zooms about the midpoint.
+        if (this.pointers.size < 2) return;
         const d = this.pinchDistance();
-        if (this.pinchDist > 0 && d > 0) {
-          const c = this.pinchCentre();
-          this.host.interacted();
-          this.host.zoomAt(c.x, c.y, d / this.pinchDist);
-        }
+        const c = this.pinchCentre();
+        const dx = c.x - this.pinchMid.x;
+        const dy = c.y - this.pinchMid.y;
+        if (dx !== 0 || dy !== 0 || (this.pinchDist > 0 && d > 0 && d !== this.pinchDist)) this.host.interacted();
+        if (dx !== 0 || dy !== 0) this.host.pan(dx, dy);
+        if (this.pinchDist > 0 && d > 0 && d !== this.pinchDist) this.host.zoomAt(c.x, c.y, d / this.pinchDist);
         this.pinchDist = d;
+        this.pinchMid = c;
         return;
       }
     }
@@ -143,10 +207,16 @@ export class InputController {
     this.pointers.delete(e.pointerId);
     const g = this.gesture;
     if (g.kind === 'pinch') {
+      // Lifting one finger ends the two-finger gesture; the other doesn't start a drag.
       if (this.pointers.size === 0) this.gesture = { kind: 'none' };
       return;
     }
     if (g.kind === 'none' || ('id' in g && g.id !== e.pointerId)) return;
+    // A quick drag that ended before the pick came back still moves the camera.
+    if (g.kind === 'pending' && g.moved) {
+      this.decide(g, null);
+      if (this.gesture.kind === 'camera') this.applyCamera(this.gesture, p.x, p.y);
+    }
     this.gesture = { kind: 'none' };
     if (g.kind === 'node') {
       this.host.dragEnd();
@@ -164,6 +234,7 @@ export class InputController {
   };
 
   private readonly leave = (e: PointerEvent) => {
+    this.inside = false;
     if (e.pointerType === 'mouse' && this.gesture.kind === 'none') this.host.leave();
   };
 

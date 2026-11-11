@@ -66,6 +66,13 @@ export function toRender(d: Drawn): RenderGraph {
   }
 }
 
+/** How to move around a graph view, with a mouse and by touch (GraphControls.vue says the same). */
+export function controlsHint(mode: '2d' | '3d'): { mouse: string; touch: string } {
+  return mode === '2d'
+    ? { mouse: 'Drag: pan · Scroll: zoom · Drag a node: move it · Arrows, + and −', touch: 'One finger: pan · Two fingers: pan and pinch to zoom' }
+    : { mouse: 'Drag: tilt and turn · Shift-, right- or Space-drag: pan · Scroll: zoom', touch: 'One finger: tilt and turn · Two fingers: pan and pinch to zoom' }
+}
+
 /** A value as text, for result tables. */
 export function fmt(v: unknown): string {
   if (v === null || v === undefined) return 'null'

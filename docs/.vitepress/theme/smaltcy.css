@@ -57,3 +57,9 @@
 .cy-run-graph-bar button { background: var(--vp-c-bg); padding: 2px 8px; }
 .cy-run-graph-bar button.on { background: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); color: var(--vp-c-white); }
 .cy-run-graph-bar span:not(:empty) { margin-left: 4px; padding: 2px 6px; border-radius: 6px; background: var(--vp-c-bg); color: var(--vp-c-text-2); font-family: var(--vp-font-family-mono); font-size: 12px; }
+.cy-run-hint { position: absolute; right: 8px; bottom: 6px; max-width: calc(100% - 16px); padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--vp-c-bg) 85%, transparent); font-size: 12px; color: var(--vp-c-text-2); pointer-events: none; text-align: right; }
+.cy-run-hint .gc-touch { display: none; }
+@media (pointer: coarse) {
+  .cy-run-hint .gc-touch { display: inline; }
+  .cy-run-hint .gc-mouse { display: none; }
+}

@@ -6,6 +6,7 @@ import { connect, type GraphClient } from '../../../../src/worker/client'
 import type { DatasetRequest } from '../../../../src/worker/protocol'
 import { createGraphView, GpuUnavailableError, type GraphView, type RenderGraph } from '../../../../src/render/index'
 import { EXAMPLES, type DatasetKey } from './examples'
+import GraphControls from './GraphControls.vue'
 import { collect as collectRows, decodeCode, fmt, toRender as toRenderGraph, type GEdge, type GNode } from '../graph-results'
 
 type Row = readonly unknown[]
@@ -341,6 +342,7 @@ onBeforeUnmount(() => {
         <div v-if="gpuError" class="pg-gpu">{{ gpuError }}</div>
         <div v-if="hover" class="pg-tip" :style="{ left: hover.x + 14 + 'px', top: hover.y + 14 + 'px' }">{{ hover.text }}</div>
         <div class="pg-stats">{{ statsText }}</div>
+        <GraphControls v-if="!gpuError" :mode="mode" />
       </section>
     </div>
   </div>

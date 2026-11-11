@@ -5,11 +5,13 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useData } from 'vitepress'
 import { connect, type GraphClient } from '../../../../src/worker/client'
 import { createGraphView, GpuUnavailableError, type GraphView } from '../../../../src/render/index'
+import GraphControls from './GraphControls.vue'
 
 const { isDark } = useData()
 
 const SIZES = [10_000, 25_000, 50_000, 100_000]
-const size = ref(25_000)
+// 10,000 by default: it lays out quickly on most GPUs. The larger sizes are a click away.
+const size = ref(10_000)
 const store = ref<'memory' | 'csr'>('csr')
 const mode = ref<'2d' | '3d'>('2d')
 const labels = ref(false)
@@ -210,6 +212,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
         <canvas ref="canvas" class="td-canvas" />
         <div v-if="gpuError" class="td-gpu">{{ gpuError }}</div>
         <div v-if="highlightText" class="td-highlight">{{ highlightText }}</div>
+        <GraphControls v-if="!gpuError" :mode="mode" />
       </section>
       <aside class="td-side">
         <label class="td-field">

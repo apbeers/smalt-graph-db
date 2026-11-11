@@ -100,7 +100,7 @@ async function main() {
   try {
     const page = await browser.newPage({ viewport: { width: 940, height: 640 }, deviceScaleFactor: 1 });
     page.on('pageerror', (e) => errors.push(`page error: ${e.message}`));
-    page.on('console', (m) => {
+  page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console error: ${m.text()}`);
     });
     await page.goto(url);
@@ -314,6 +314,78 @@ async function main() {
     await page.mouse.up();
     await page.evaluate(() => window.waitFrames(5));
     await page.locator('canvas').screenshot({ path: join(shots, 'render-3d-orbit.png') });
+
+    // Panning: two fingers, Shift-drag, Space-drag and the arrow keys move the camera; a pinch zooms.
+    const screenOf = (i) => page.evaluate(async (i) => {
+      await window.waitFrames(3);
+      return window.view.screenPosition(i);
+    }, i);
+    const touch = (type, id, x, y) =>
+      page.evaluate(([type, id, x, y]) => {
+        const c = document.querySelector('canvas');
+        const r = c.getBoundingClientRect();
+        c.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: r.left + x, clientY: r.top + y, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true }));
+      }, [type, id, x, y]);
+    const twoFingers = async (from, to) => {
+      await touch('pointerdown', 1, from[0], from[1]);
+      await touch('pointerdown', 2, from[2], from[3]);
+      for (let k = 1; k <= 6; k++) {
+        const t = k / 6;
+        const at = from.map((v, j) => v + (to[j] - v) * t);
+        await touch('pointermove', 1, at[0], at[1]);
+        await touch('pointermove', 2, at[2], at[3]);
+      }
+      await touch('pointerup', 1, to[0], to[1]);
+      await touch('pointerup', 2, to[2], to[3]);
+    };
+    const moved = async (label, act, expect) => {
+      const a0 = await screenOf(0), b0 = await screenOf(1);
+      await act();
+      const a1 = await screenOf(0), b1 = await screenOf(1);
+      const dx = a1.x - a0.x, dy = a1.y - a0.y;
+      const spread = Math.hypot(b1.x - a1.x, b1.y - a1.y) / Math.max(1e-6, Math.hypot(b0.x - a0.x, b0.y - a0.y));
+      check(expect({ dx, dy, spread }), `${label} (moved ${dx.toFixed(0)}, ${dy.toFixed(0)} px; scale ×${spread.toFixed(2)})`);
+    };
+    const panned = (ex, ey) => ({ dx, dy, spread }) => Math.abs(spread - 1) < 0.05 && Math.sign(dx) === Math.sign(ex) && Math.sign(dy) === Math.sign(ey) && Math.abs(dx) > Math.abs(ex) * 0.4 && Math.abs(dy) > Math.abs(ey) * 0.4;
+    for (const mode of ['3d', '2d']) {
+      await page.evaluate(async (m) => {
+        window.view.setMode(m);
+        window.view.layout.stop();
+        window.view.fit();
+        await window.waitFrames(40);
+      }, mode);
+      await moved(`${mode}: two fingers pan`, () => twoFingers([300, 300, 400, 300], [360, 340, 460, 340]), panned(60, 40));
+      await moved(`${mode}: two fingers pinch to zoom`, () => twoFingers([330, 300, 370, 300], [280, 300, 420, 300]), ({ spread }) => spread > 1.5);
+      await moved(`${mode}: Shift-drag pans`, async () => {
+        await page.keyboard.down('Shift');
+        await page.mouse.move(box.x + 12, box.y + 12);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 72, box.y + 52, { steps: 6 });
+        await page.mouse.up();
+        await page.keyboard.up('Shift');
+      }, panned(60, 40));
+      await moved(`${mode}: Space-drag pans`, async () => {
+        await page.mouse.move(box.x + 12, box.y + 12);
+        await page.keyboard.down('Space');
+        await page.mouse.down();
+        await page.mouse.move(box.x - 48 + 12, box.y + 12 + 30, { steps: 6 });
+        await page.mouse.up();
+        await page.keyboard.up('Space');
+      }, panned(-60, 30));
+      await moved(`${mode}: arrow keys pan`, async () => {
+        await page.locator('canvas').focus();
+        await page.keyboard.press('ArrowLeft');
+        await page.keyboard.press('ArrowUp');
+      }, panned(40, 40));
+      await moved(`${mode}: + zooms in`, async () => {
+        await page.locator('canvas').focus();
+        await page.keyboard.press('+');
+      }, ({ spread }) => spread > 1.1);
+    }
+    await page.evaluate(async () => {
+      window.view.setMode('3d');
+      await window.waitFrames(5);
+    });
     const back = await page.evaluate(async () => {
       window.view.setMode('2d');
       await window.waitFrames(5);
@@ -355,7 +427,10 @@ async function main() {
       const edges = [];
       for (let i = 1; i < 48; i++) edges.push({ source: i, target: Math.floor((i - 1) / 3) });
       view.setGraph({ nodes, edges }, { keepPositions: true });
+      // What setGraph kept, before the layout's first tick moves anything.
+      view.layout.stop();
       const p1 = await view.positions();
+      view.layout.start();
       let maxShift = 0;
       for (let i = 0; i < 36 * 3; i++) maxShift = Math.max(maxShift, Math.abs(p1[i] - p0[i]));
       await window.settle(view, 60000);
