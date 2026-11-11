@@ -42,11 +42,19 @@ try {
 | `fit()` | Frames the whole graph |
 | `onHover(fn)`, `onClick(fn)` | Called with `{ kind: 'node' \| 'edge', index }` or `null`, from GPU picking |
 | `layout.start()`, `layout.stop()`, `layout.reheat()` | Controls the force layout, which stops by itself once it settles |
+| `pick(x, y)`, `screenPosition(index)` | The node or edge at a point, and where a node is, in CSS pixels |
 | `stats()` | Nodes, edges, frames per second and layout time per tick |
 | `destroy()` | Frees the GPU resources |
 
 In 2D, drag the background to pan, scroll to zoom and drag a node to move it. In 3D, drag to orbit, shift-drag or
-right-drag to pan and scroll to move closer.
+right-drag to pan, scroll to move closer, and drag a node to move it in the plane facing you.
+
+## The layout
+
+One compute pass per tick, one GPU thread per node: every node repels every other (in tiles of 256 in workgroup
+memory; sampled above 20,480 nodes), relationships pull their ends together, and gravity holds the graph to the
+centre. The layout cools and stops by itself, and the view draws only when something changes, so a settled graph
+costs no GPU time.
 
 ## From query results
 

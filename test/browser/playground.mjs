@@ -40,7 +40,11 @@ const check = (cond, msg) => {
   if (!cond) failures++;
 };
 
-const browser = await chromium.launch({ args: ['--enable-unsafe-webgpu'] });
+// Headless Chromium loses the WebGPU device when it presents to a canvas unless SwiftShader backs both GL and Vulkan
+// (the same flags as test/browser/render/run.mjs).
+const browser = await chromium.launch({
+  args: ['--enable-unsafe-webgpu', '--enable-gpu', '--use-gl=angle', '--use-angle=swiftshader', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--enable-unsafe-swiftshader'],
+});
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
