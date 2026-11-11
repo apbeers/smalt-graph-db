@@ -25,10 +25,10 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test",
     "build": "node scripts/build.mjs",
-    "test:browser": "node scripts/build.mjs && node test/browser/run.mjs",
-    "bench": "node --import ./scripts/ts-loader.mjs bench/run.ts",
-    "docs:dev": "node scripts/build.mjs --playground && vitepress dev docs",
-    "docs:build": "node scripts/build.mjs --playground && vitepress build docs",
+    "test:browser": "node test/browser/run.mjs",
+    "bench": "node scripts/bench.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"
   },
   "exports": {

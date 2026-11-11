@@ -5,5 +5,5 @@ coverage/
 .cache/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
-docs/public/playground/
 .claude/worktrees/
+bench/results/*.local.json

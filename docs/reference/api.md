@@ -1,0 +1,49 @@
+# API
+
+## `@smaltworks/smaltcy`
+
+| Export | What it is |
+| --- | --- |
+| `open({ store })` | A `Graph`: an in-memory `MemoryStore` unless you pass a store |
+| `Graph` | `run(cypher, params)`, `query(cypher, params)`, `explain(cypher)`, `transaction(fn)`, `load(json)`, `toJSON()`, `engine`, `store` |
+| `connect(worker)` | A `GraphClient` for a graph in a Web Worker ([guide](/guide/worker)) |
+| `compile(cypher)` | The plan for a Cypher statement, without running it |
+| `MemoryStore`, `CsrStore` | The [stores](./stores) |
+| `SmaltcyError` | Every error: `code`, `message`, and `position` (line and column) for errors in the text |
+
+A result:
+
+```ts
+interface CypherResult {
+  columns: string[];
+  rows: ResultValue[][];
+  counts: { nodesCreated; nodesDeleted; relationshipsCreated; relationshipsDeleted; propertiesSet; labelsAdded; labelsRemoved };
+  ms: number;          // time spent running the plan
+  plan: GraphPlan;     // what ran
+  explain?: ExplainLine[]; // for EXPLAIN
+}
+```
+
+## Error codes
+
+| Code | Meaning |
+| --- | --- |
+| `SMALTCY_SYNTAX` | The text doesn't parse |
+| `SMALTCY_SEMANTIC` | The text parses but means nothing: an unknown variable, an aggregate in `WHERE` |
+| `SMALTCY_PLAN` | A plan failed validation |
+| `SMALTCY_TYPE` | A value had the wrong type when the query ran |
+| `SMALTCY_CONSTRAINT` | A write would break the graph, such as deleting a node that still has relationships |
+| `SMALTCY_PARAM` | A parameter is missing |
+| `SMALTCY_UNSUPPORTED` | The store can't do this, such as a write on a read-only store |
+| `SMALTCY_NOT_FOUND` | An unknown function, node or relationship |
+
+## Other entry points
+
+| Entry | Contents |
+| --- | --- |
+| `@smaltworks/smaltcy/engine` | The engine with no language: `GraphEngine`, the plan types and builders, stores, the function library |
+| `@smaltworks/smaltcy/plan` | The plan format, its builders and validator |
+| `@smaltworks/smaltcy/cypher` | `compile`, `parse` and `bind`: Cypher to plans |
+| `@smaltworks/smaltcy/render` | The GPU graph view ([guide](/guide/rendering)) |
+| `@smaltworks/smaltcy/datasets` | The sample graphs: `social`, `family`, `metro`, `network` |
+| `@smaltworks/smaltcy/worker` | The worker script |

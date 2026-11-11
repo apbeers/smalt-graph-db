@@ -1,0 +1,19 @@
+/* smaltcy's additions to the family theme. */
+.cy-wordmark {
+  font-family: var(--font-brand, 'Martian Mono', monospace);
+  font-weight: 600;
+  font-stretch: 112.5%;
+  letter-spacing: -0.06em;
+  font-size: 22px;
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  margin-right: 12px;
+}
+.cy-wordmark .alt {
+  color: var(--vp-c-brand-1);
+}
+.cy-wordmark-hero {
+  font-size: clamp(48px, 9vw, 88px);
+  display: inline-block;
+  line-height: 1.1;
+}

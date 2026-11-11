@@ -119,7 +119,14 @@ export class CsrStore implements GraphStore {
 
   private readonly lazyIndexes = new Map<string, Map<string, number[]>>();
 
+  private cachedStats: StoreStats | null = null;
+
+  /** Computed once: the store never changes. */
   stats(): StoreStats {
+    return (this.cachedStats ??= this.computeStats());
+  }
+
+  private computeStats(): StoreStats {
     const labels = new Map<string, number>();
     this.labelNames.names.forEach((l, i) => labels.set(l, this.byLabel[i]!.length));
     const types = new Map<string, number>();
