@@ -1,0 +1,73 @@
+{
+  "name": "@smaltworks/smaltcy",
+  "version": "0.1.0",
+  "description": "A graph database for the browser that speaks Cypher, written in TypeScript.",
+  "keywords": [
+    "graph",
+    "database",
+    "cypher",
+    "opencypher",
+    "browser",
+    "webgpu",
+    "embedded"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apbeers/smalt-graph-db.git"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test",
+    "build": "node scripts/build.mjs",
+    "test:browser": "node test/browser/run.mjs",
+    "test:browser:quick": "node test/browser/run.mjs --quick",
+    "test:quick": "npm run check && npm run test:browser:quick",
+    "bench": "node scripts/bench.mjs",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/smaltcy.js"
+    },
+    "./engine": {
+      "types": "./dist/types/engine/index.d.ts",
+      "default": "./dist/engine.js"
+    },
+    "./plan": {
+      "types": "./dist/types/plan/index.d.ts",
+      "default": "./dist/plan.js"
+    },
+    "./cypher": {
+      "types": "./dist/types/cypher/index.d.ts",
+      "default": "./dist/cypher.js"
+    },
+    "./render": {
+      "types": "./dist/types/render/index.d.ts",
+      "default": "./dist/render.js"
+    },
+    "./worker": "./dist/smaltcy-worker.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "^0.28.2",
+    "typescript": "7.0",
+    "vitepress": "1.6.4",
+    "vitest": "^5.1.0"
+  }
+}
