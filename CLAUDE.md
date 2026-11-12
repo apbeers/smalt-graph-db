@@ -15,6 +15,11 @@ badges unchanged from the family. smaltcy has no mark or product colour yet (ADR
 Early development (owner, 2026-11-12): no pull requests. When work is done and `npm run check` passes, commit and push
 it straight to `main`. This replaces the family rule of one PR per task until the owner says otherwise.
 
+The site (https://andrewbeers.me/smalt-graph-db/) deploys from `.github/workflows/docs.yml` only: the repository's
+Settings → Pages → Source must stay **GitHub Actions**. With "Deploy from a branch", GitHub publishes the repository's
+root on every push and replaces the site with a 404 (2026-11-12). A push that touches no docs or source doesn't
+redeploy; run the Docs workflow by hand to republish.
+
 ## Commands
 
 | Command | What it does |
