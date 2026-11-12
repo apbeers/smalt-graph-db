@@ -208,6 +208,8 @@ try {
   // On a phone, playing the demo's timeline must not move the page: its readout changes length every step, and a
   // grid column that grows with its content made the whole page shake.
   {
+    // The desktop page is still laying out 10,000 nodes on the software GPU: close it so the phone page gets frames.
+    await page.close();
     const phone = await browser.newContext({ ...devices['iPhone 13'] });
     const pp = await phone.newPage();
     pp.on('pageerror', (e) => errors.push(e.message));
@@ -223,12 +225,14 @@ try {
     });
     const seen = new Set([await layout()]);
     await pp.locator('.td-tl button[aria-label^="Play"]').click();
-    for (let i = 0; i < 25; i++) {
-      await pp.waitForTimeout(60);
+    // Sample the layout until the timeline has played at least 8 versions (or 30 s pass).
+    const t0 = Date.now();
+    let v = '0';
+    while (Number(v) < 8 && Date.now() - t0 < 30000) {
       seen.add(await layout());
+      v = (await pp.locator('.td-tl [role="slider"]').getAttribute('aria-valuenow')) ?? '0';
     }
-    const v = await pp.locator('.td-tl [role="slider"]').getAttribute('aria-valuenow');
-    check(Number(v) > 3 && seen.size === 1 && !JSON.parse([...seen][0]).wide, `on a phone, playing the timeline (to version ${v}) doesn't move the page (${seen.size} layout${seen.size === 1 ? '' : 's'})`);
+    check(Number(v) >= 8 && seen.size === 1 && !JSON.parse([...seen][0]).wide, `on a phone, playing the timeline (to version ${v}) doesn't move the page (${seen.size} layout${seen.size === 1 ? '' : 's'})`);
     await phone.close();
   }
 
