@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { open, SmaltcyError, type Graph } from '@smaltworks/smaltcy';
 import { HistoryStore, snapshotOf, type GraphDiff, type GraphSnapshot } from '@smaltworks/smaltcy/history';
-import { social } from '@smaltworks/smaltcy/datasets';
+import { network, ontology, social } from '@smaltworks/smaltcy/datasets';
+import { createHandler } from '@smaltworks/smaltcy/worker-runtime';
 
 /** A snapshot in a canonical order, for comparing. */
 function canon(s: GraphSnapshot): unknown {
@@ -197,5 +198,56 @@ describe('temporal Cypher', () => {
     expect(evolving().explain('AT VERSION 2 MATCH (n) RETURN n')).toBeDefined();
     const r = evolving().run('EXPLAIN AT VERSION 2 MATCH (n) RETURN n');
     expect(String(r.rows[0]![0])).toMatch(/AsOf  version 2/);
+  });
+});
+
+describe('datasets with history', () => {
+  test('the network grows a person at a time, ending as the plain network', () => {
+    const g = open({ history: true });
+    g.load(network(300, 42, { history: true }));
+    expect(g.version).toBe(301); // the cities, then 300 people
+    const plain = open();
+    plain.load(network(300, 42));
+    const q = 'MATCH (p:Person)-[:KNOWS]->(q) RETURN p.name AS p, q.name AS q ORDER BY p, q';
+    expect(g.query(q)).toEqual(plain.query(q));
+    expect(g.query('AT VERSION 10 MATCH (p:Person) RETURN count(p) AS n')).toEqual([{ n: 9 }]);
+    expect(g.commits()[4]).toMatchObject({ author: 'growth', message: expect.stringMatching(/joins$/) });
+  });
+
+  test('the ontology changes over six months', () => {
+    const g = open({ history: true });
+    g.load(ontology());
+    const commits = g.commits();
+    expect(commits.length).toBeGreaterThan(20);
+    expect(new Set(commits.map((c) => c.author))).toEqual(new Set(['ana', 'bo', 'chen', 'dara']));
+    // ingest_orders came, was deprecated, then went.
+    const v = commits.find((c) => c.message === 'Deprecate ingest_orders')!.version;
+    expect(g.query(`AT VERSION ${v} MATCH (f:Flow {name: 'ingest_orders'}) RETURN f.status AS s`)).toEqual([{ s: 'deprecated' }]);
+    expect(g.query("MATCH (f:Flow {name: 'ingest_orders'}) RETURN f")).toEqual([]);
+    const [h] = g.query(`AT VERSION ${v} MATCH (f:Flow {name: 'ingest_orders'}) RETURN [c IN history(f) | c.author + ': ' + c.change] AS h`);
+    expect(h!.h).toEqual(['chen: created', 'chen: set', 'chen: set']);
+    // Lineage at the end: what feeds the churn dashboard.
+    const lineage = g.query("MATCH (:Dashboard {name: 'Churn risk'})-[:SHOWS]->(d)-[:WRITES|READS*1..8]-(x:Dataset) RETURN DISTINCT x.name AS n ORDER BY n");
+    expect(lineage.map((r) => r.n)).toContain('customers');
+  });
+});
+
+describe('the worker with history', () => {
+  test('datasets with history, commits, diffs and past overviews', () => {
+    const h = createHandler();
+    const loaded = h.handle({ id: 1, type: 'dataset', dataset: { name: 'ontology', history: true } });
+    expect(loaded).toMatchObject({ ok: true, result: { reused: false } });
+    const version = (loaded as { result: { version: number } }).result.version;
+    expect(version).toBeGreaterThan(20);
+    const commits = h.handle({ id: 2, type: 'commits' });
+    expect(commits.ok && (commits.result as unknown[]).length).toBe(version);
+    const diff = h.handle({ id: 3, type: 'diff', from: version, to: 3 });
+    expect(diff).toMatchObject({ ok: true, result: { from: version, to: 3 } });
+    const past = h.handle({ id: 4, type: 'overview', asOf: 3 });
+    expect(past.ok && (past.result as { ids: number[] }).ids.length).toBe(7); // 4 systems and 3 teams
+    // Without history, past versions fail cleanly.
+    const plain = createHandler();
+    plain.handle({ id: 5, type: 'dataset', dataset: { name: 'social' } });
+    expect(plain.handle({ id: 6, type: 'commits' })).toMatchObject({ ok: false, error: { code: 'SMALTCY_UNSUPPORTED' } });
   });
 });

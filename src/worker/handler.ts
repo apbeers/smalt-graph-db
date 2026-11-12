@@ -1,18 +1,19 @@
 /** The worker's request handling, kept apart from `self` so tests can run it in Node. */
 import { CsrStore, open, type Graph } from '../index.js';
-import { family, metro, network, social } from '../datasets/index.js';
+import { family, metro, network, ontology, social } from '../datasets/index.js';
 import { SmaltcyError } from '../errors.js';
 import type { GraphStore } from '../store/interface.js';
 import type { DatasetLoaded, DatasetRequest, Overview, Request, Response } from './protocol.js';
 
-const keyOf = (d: DatasetRequest) => `${d.name}:${d.size ?? ''}:${d.store ?? 'memory'}`;
+const keyOf = (d: DatasetRequest) => `${d.name}:${d.size ?? ''}:${d.history ? 'history' : (d.store ?? 'memory')}`;
 
 function generate(d: DatasetRequest) {
   switch (d.name) {
     case 'social': return social();
     case 'family': return family();
     case 'metro': return metro();
-    case 'network': return network(d.size ?? 2000);
+    case 'network': return network(d.size ?? 2000, undefined, { history: d.history });
+    case 'ontology': return ontology();
   }
   throw new SmaltcyError('SMALTCY_NOT_FOUND', `No sample dataset ${String((d as { name: unknown }).name)}`);
 }
@@ -67,14 +68,14 @@ export function createHandler(graph: Graph = open()): { handle(req: Request): Re
   const useDataset = (d: DatasetRequest): DatasetLoaded => {
     const key = keyOf(d);
     const st0 = () => state.graph.store.stats();
-    if (state.dataset === key) return { nodes: st0().nodes, relationships: st0().rels, ms: 0, reused: true };
+    if (state.dataset === key) return { nodes: st0().nodes, relationships: st0().rels, ms: 0, reused: true, ...(state.graph.version !== undefined ? { version: state.graph.version } : {}) };
     const t0 = performance.now();
-    const g = open();
-    g.load(generate(d));
-    state.graph = d.store === 'csr' ? open({ store: CsrStore.from(g.store) }) : g;
+    const g = open({ history: !!d.history });
+    g.load(generate(d), { author: 'sample data', message: `Load the ${d.name} dataset` });
+    state.graph = d.store === 'csr' && !d.history ? open({ store: CsrStore.from(g.store) }) : g;
     state.dataset = key;
     const st = st0();
-    return { nodes: st.nodes, relationships: st.rels, ms: performance.now() - t0, reused: false };
+    return { nodes: st.nodes, relationships: st.rels, ms: performance.now() - t0, reused: false, ...(g.version !== undefined ? { version: g.version } : {}) };
   };
   return {
     get graph() {
@@ -101,7 +102,12 @@ export function createHandler(graph: Graph = open()): { handle(req: Request): Re
             const st = g.store.stats();
             return { id: req.id, ok: true, result: { nodes: st.nodes, relationships: st.rels, labels: Object.fromEntries(st.labels), types: Object.fromEntries(st.types) } };
           }
-          case 'overview': return { id: req.id, ok: true, result: overview(g.store, req.limit, req.captionKeys, req.groupKey) };
+          case 'overview': {
+            const store = req.asOf === undefined ? g.store : g.at(req.asOf).store;
+            return { id: req.id, ok: true, result: overview(store, req.limit, req.captionKeys, req.groupKey) };
+          }
+          case 'commits': return { id: req.id, ok: true, result: g.commits(req.from, req.to) };
+          case 'diff': return { id: req.id, ok: true, result: g.diff(req.from, req.to) };
         }
       } catch (e) {
         const err = e instanceof SmaltcyError ? { code: e.code, message: e.message, position: e.position } : { code: 'SMALTCY_INTERNAL', message: String((e as Error)?.message ?? e) };

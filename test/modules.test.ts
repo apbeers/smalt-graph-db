@@ -19,9 +19,9 @@ const LAYERS: Record<string, { runtime: string[]; types?: string[] }> = {
   history: { runtime: ['store', 'values', 'errors'], types: ['plan'] },
   cypher: { runtime: ['plan', 'functions', 'values', 'errors'] },
   render: { runtime: [] },
-  datasets: { runtime: [], types: ['engine'] },
+  datasets: { runtime: [], types: ['engine', 'store', 'values'] },
   worker: { runtime: ['index', 'datasets', 'store', 'engine', 'errors', 'values'], types: ['plan'] },
-  client: { runtime: ['worker', 'errors', 'values'] },
+  client: { runtime: ['worker', 'errors', 'values'], types: ['store'] },
   index: { runtime: ['cypher', 'engine', 'store', 'history', 'plan', 'worker', 'errors', 'values'] },
 };
 

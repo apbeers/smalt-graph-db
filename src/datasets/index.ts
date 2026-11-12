@@ -3,6 +3,8 @@
  * no outside data.
  */
 import type { GraphJSON } from '../engine/io.js';
+import type { PropertyValue } from '../values.js';
+import { HistoryBuilder } from './history.js';
 
 type Node = GraphJSON['nodes'][number];
 type Rel = GraphJSON['relationships'][number];
@@ -138,7 +140,7 @@ export function metro(lines = 8, stationsPerLine = 30, seed = 7): GraphJSON {
  * A larger social network grown by preferential attachment (well-connected people gain more friends), with
  * communities and cities. `people` sets the size: 5,000 people make about 25,000 relationships.
  */
-export function network(people = 2000, seed = 42): GraphJSON {
+export function network(people = 2000, seed = 42, options: { history?: boolean } = {}): GraphJSON {
   const rand = rng(seed);
   const cities = ['Lisbon', 'Osaka', 'Accra', 'Quito', 'Tallinn', 'Perth', 'Montreal', 'Pune'];
   const first = ['Ana', 'Bo', 'Chen', 'Dara', 'Eli', 'Femi', 'Gus', 'Hana', 'Ivo', 'Jun', 'Kai', 'Lea', 'Mo', 'Nia', 'Oto', 'Pia', 'Quin', 'Rui', 'Sol', 'Tae', 'Uma', 'Vik', 'Wen', 'Yara', 'Zed'];
@@ -167,5 +169,186 @@ export function network(people = 2000, seed = 42): GraphJSON {
       ends.push(i, j);
     }
   }
-  return { nodes, relationships, indexes: [{ label: 'Person', key: 'name' }] };
+  const json: GraphJSON = { nodes, relationships, indexes: [{ label: 'Person', key: 'name' }] };
+  return options.history ? growthHistory(json) : json;
+}
+
+/**
+ * The network as it grew: the cities first, then one commit per person joining (with where they live and whom they
+ * know), an hour apart from 1 January 2025.
+ */
+function growthHistory(json: GraphJSON): GraphJSON {
+  const b = new HistoryBuilder();
+  const ids = new Map<string | number, number>();
+  const start = Date.UTC(2025, 0, 1);
+  const byStart = new Map<string | number, GraphJSON['relationships'][number][]>();
+  for (const r of json.relationships) {
+    let list = byStart.get(r.start);
+    if (!list) byStart.set(r.start, (list = []));
+    list.push(r);
+  }
+  for (const n of json.nodes) if (n.labels?.includes('City')) ids.set(n.id, b.node(n.labels ?? [], n.properties ?? {}));
+  b.commit(start, 'growth', 'Add the cities');
+  for (const n of json.nodes) {
+    if (n.labels?.includes('City')) continue;
+    ids.set(n.id, b.node(n.labels ?? [], n.properties ?? {}));
+    for (const r of byStart.get(n.id) ?? []) b.rel(r.type, ids.get(r.start)!, ids.get(r.end)!, r.properties ?? {});
+    b.commit(start + (Number(n.id) + 1) * 3_600_000, 'growth', `${n.properties?.name ?? n.id} joins`);
+  }
+  b.index('Person', 'name');
+  return b.build();
+}
+
+/**
+ * A data platform's ontology as it changed over six months: systems, datasets, the flows between them, the teams that
+ * own them and the dashboards on top, with who changed what and why. 40-odd commits by four people.
+ */
+export function ontology(): GraphJSON {
+  const b = new HistoryBuilder();
+  let t = Date.UTC(2026, 4, 4, 9);
+  const day = 86_400_000;
+  const at = (days: number, hours = 0) => (t += days * day + hours * 3_600_000);
+  const sys = (name: string, kind: string) => b.node(['System'], { name, kind });
+  const ds = (name: string, props: Record<string, PropertyValue> = {}) => b.node(['Dataset'], { name, ...props });
+  const flow = (name: string, schedule: string) => b.node(['Flow'], { name, schedule, status: 'active' });
+  const team = (name: string) => b.node(['Team'], { name });
+
+  const ordersDb = sys('Orders DB', 'database');
+  const stream = sys('Event stream', 'stream');
+  b.commit(at(0), 'ana', 'Add the source systems');
+  const warehouse = sys('Warehouse', 'warehouse');
+  const lake = sys('Raw file store', 'files');
+  b.commit(at(1), 'ana', 'Add the warehouse and the raw file store');
+  const payments = team('Payments');
+  const growth = team('Growth');
+  const platform = team('Data platform');
+  b.commit(at(2), 'ana', 'Add the teams');
+  const orders = ds('orders', { rows: 1_200_000 });
+  const customers = ds('customers', { rows: 85_000 });
+  b.rel('STORED_IN', orders, ordersDb);
+  b.rel('STORED_IN', customers, ordersDb);
+  b.rel('OWNS', payments, orders);
+  b.rel('OWNS', payments, customers);
+  b.commit(at(1, 3), 'ana', 'Model the orders database');
+  const events = ds('click_events', { rows: 40_000_000 });
+  b.rel('STORED_IN', events, stream);
+  b.rel('OWNS', growth, events);
+  b.commit(at(2), 'bo', 'Add click events');
+  const rawOrders = ds('raw_orders');
+  b.rel('STORED_IN', rawOrders, lake);
+  const ingest = flow('ingest_orders', 'hourly');
+  b.rel('READS', ingest, orders);
+  b.rel('WRITES', ingest, rawOrders);
+  b.rel('OWNS', platform, ingest);
+  b.commit(at(3), 'chen', 'Ingest orders to the raw store');
+  const factOrders = ds('fact_orders');
+  b.rel('STORED_IN', factOrders, warehouse);
+  const load = flow('load_orders', 'hourly');
+  b.rel('READS', load, rawOrders);
+  b.rel('WRITES', load, factOrders);
+  b.rel('OWNS', platform, load);
+  b.commit(at(1), 'chen', 'Load orders into the warehouse');
+  const dimCustomers = ds('dim_customers');
+  b.rel('STORED_IN', dimCustomers, warehouse);
+  const cdc = flow('cdc_customers', 'streaming');
+  b.rel('READS', cdc, customers);
+  b.rel('WRITES', cdc, dimCustomers);
+  b.rel('OWNS', platform, cdc);
+  b.commit(at(2), 'chen', 'Stream customer changes into the warehouse');
+  b.label(customers, 'PII');
+  b.label(dimCustomers, 'PII');
+  b.commit(at(1), 'dara', 'Tag personal data');
+  const sessions = ds('sessions');
+  b.rel('STORED_IN', sessions, warehouse);
+  const sessionize = flow('sessionize', 'daily');
+  b.rel('READS', sessionize, events);
+  b.rel('WRITES', sessionize, sessions);
+  b.rel('OWNS', growth, sessionize);
+  b.commit(at(4), 'bo', 'Sessionize click events');
+  const revenue = ds('revenue_daily');
+  b.rel('STORED_IN', revenue, warehouse);
+  const rollup = flow('revenue_rollup', 'daily');
+  b.rel('READS', rollup, factOrders);
+  b.rel('READS', rollup, dimCustomers);
+  b.rel('WRITES', rollup, revenue);
+  b.rel('OWNS', payments, rollup);
+  b.commit(at(3), 'ana', 'Daily revenue');
+  const dashRevenue = b.node(['Dashboard'], { name: 'Revenue' });
+  b.rel('SHOWS', dashRevenue, revenue);
+  b.rel('OWNS', payments, dashRevenue);
+  b.commit(at(1), 'ana', 'Revenue dashboard');
+  const funnel = ds('conversion_funnel');
+  b.rel('STORED_IN', funnel, warehouse);
+  const funnelFlow = flow('build_funnel', 'daily');
+  b.rel('READS', funnelFlow, sessions);
+  b.rel('READS', funnelFlow, factOrders);
+  b.rel('WRITES', funnelFlow, funnel);
+  b.rel('OWNS', growth, funnelFlow);
+  const dashFunnel = b.node(['Dashboard'], { name: 'Funnel' });
+  b.rel('SHOWS', dashFunnel, funnel);
+  b.rel('OWNS', growth, dashFunnel);
+  b.commit(at(6), 'bo', 'Conversion funnel and its dashboard');
+  b.set(orders, 'rows', 1_900_000);
+  b.set(events, 'rows', 72_000_000);
+  b.commit(at(10), 'chen', 'Update row counts');
+  b.set(ingest, 'schedule', 'every 15 minutes');
+  b.commit(at(5), 'chen', 'Ingest orders more often');
+  const payDb = sys('Payments DB', 'database');
+  const charges = ds('charges', { rows: 2_400_000 });
+  b.rel('STORED_IN', charges, payDb);
+  b.rel('OWNS', payments, charges);
+  b.label(charges, 'PII');
+  b.commit(at(7), 'dara', 'Add the payments database');
+  const factCharges = ds('fact_charges');
+  b.rel('STORED_IN', factCharges, warehouse);
+  const loadCharges = flow('load_charges', 'hourly');
+  b.rel('READS', loadCharges, charges);
+  b.rel('WRITES', loadCharges, factCharges);
+  b.rel('OWNS', platform, loadCharges);
+  b.rel('READS', rollup, factCharges);
+  b.commit(at(2), 'dara', 'Charges into the warehouse; revenue reads them');
+  // The orders pipeline moves off the raw store: load reads the database directly.
+  b.set(ingest, 'status', 'deprecated');
+  b.commit(at(12), 'chen', 'Deprecate ingest_orders');
+  for (const rid of b.relsFrom(load, 'READS')) b.deleteRel(rid);
+  b.rel('READS', load, orders);
+  b.commit(at(1), 'chen', 'load_orders reads the orders database directly');
+  b.deleteNode(ingest);
+  b.deleteNode(rawOrders);
+  b.commit(at(14), 'chen', 'Remove ingest_orders and raw_orders');
+  const ml = team('Machine learning');
+  const features = ds('customer_features');
+  b.rel('STORED_IN', features, warehouse);
+  const featureFlow = flow('build_features', 'daily');
+  b.rel('READS', featureFlow, dimCustomers);
+  b.rel('READS', featureFlow, sessions);
+  b.rel('READS', featureFlow, factCharges);
+  b.rel('WRITES', featureFlow, features);
+  b.rel('OWNS', ml, featureFlow);
+  b.rel('OWNS', ml, features);
+  b.label(features, 'PII');
+  b.commit(at(9), 'ana', 'Customer features for machine learning');
+  const churn = ds('churn_scores');
+  b.rel('STORED_IN', churn, warehouse);
+  const score = flow('score_churn', 'daily');
+  b.rel('READS', score, features);
+  b.rel('WRITES', score, churn);
+  b.rel('OWNS', ml, score);
+  const dashChurn = b.node(['Dashboard'], { name: 'Churn risk' });
+  b.rel('SHOWS', dashChurn, churn);
+  b.rel('OWNS', growth, dashChurn);
+  b.commit(at(6), 'ana', 'Churn scoring and its dashboard');
+  b.set(platform, 'name', 'Data engineering');
+  b.commit(at(4), 'dara', 'Rename the data platform team');
+  b.set(sessionize, 'schedule', 'hourly');
+  b.set(funnelFlow, 'schedule', 'hourly');
+  b.commit(at(8), 'bo', 'Sessions and the funnel hourly');
+  b.deleteNode(dashFunnel);
+  b.commit(at(10), 'bo', 'Retire the funnel dashboard');
+  b.set(orders, 'rows', 2_600_000);
+  b.set(charges, 'rows', 3_100_000);
+  b.set(events, 'rows', 118_000_000);
+  b.commit(at(12), 'chen', 'Update row counts');
+  b.index('Dataset', 'name');
+  return b.build();
 }

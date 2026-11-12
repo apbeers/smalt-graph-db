@@ -5,6 +5,7 @@ import type { GraphJSON } from '../engine/io.js';
 import { SmaltcyError, type ErrorCode } from '../errors.js';
 import type { CypherResult } from '../index.js';
 import type { DatasetLoaded, DatasetRequest, GraphStats, Overview, Request, Response } from './protocol.js';
+import type { CommitInfo, GraphDiff } from '../store/interface.js';
 
 type Body = Request extends infer R ? (R extends { id: number } ? Omit<R, 'id'> : never) : never;
 
@@ -50,9 +51,22 @@ export class GraphClient {
   stats(): Promise<GraphStats> {
     return this.send({ type: 'stats' });
   }
-  /** The graph as flat arrays, ready to draw; `groupKey` adds each node's value of that property. */
-  overview(limit?: number, options: { groupKey?: string } = {}): Promise<Overview> {
-    return this.send({ type: 'overview', limit, groupKey: options.groupKey });
+  /**
+   * The graph as flat arrays, ready to draw; `groupKey` adds each node's value of that property, `asOf` draws a past
+   * version (the graph must keep history).
+   */
+  overview(limit?: number, options: { groupKey?: string; asOf?: number } = {}): Promise<Overview> {
+    return this.send({ type: 'overview', limit, groupKey: options.groupKey, asOf: options.asOf });
+  }
+
+  /** The graph's commits in (from, to], oldest first: what a timeline shows. */
+  commits(from?: number, to?: number): Promise<readonly CommitInfo[]> {
+    return this.send({ type: 'commits', from, to });
+  }
+
+  /** What changed from one version to another, either way. */
+  diff(from: number, to: number): Promise<GraphDiff> {
+    return this.send({ type: 'diff', from, to });
   }
   close(): void {
     this.worker.terminate();

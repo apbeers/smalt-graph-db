@@ -1,6 +1,7 @@
 /** Messages between the client and the engine's Web Worker. Results are plain data (structured clone). */
 import type { GraphJSON } from '../engine/io.js';
 import type { CypherResult } from '../index.js';
+import type { CommitInfo, GraphDiff } from '../store/interface.js';
 
 export type Request =
   /**
@@ -14,15 +15,32 @@ export type Request =
   | { readonly id: number; readonly type: 'dump' }
   | { readonly id: number; readonly type: 'stats' }
   /** A compact view of the whole graph (or the first `limit` nodes), for drawing. */
-  | { readonly id: number; readonly type: 'overview'; readonly limit?: number; readonly captionKeys?: readonly string[]; readonly groupKey?: string };
+  | {
+      readonly id: number;
+      readonly type: 'overview';
+      readonly limit?: number;
+      readonly captionKeys?: readonly string[];
+      readonly groupKey?: string;
+      /** The graph as it was at this version (needs history). */
+      readonly asOf?: number;
+    }
+  /** The graph's commits in (from, to]: the timeline. */
+  | { readonly id: number; readonly type: 'commits'; readonly from?: number; readonly to?: number }
+  /** What changed from one version to another: what a drawing applies as the timeline moves. */
+  | { readonly id: number; readonly type: 'diff'; readonly from: number; readonly to: number };
 
 /** A sample dataset from `@smaltworks/smaltcy/datasets`, by name. */
 export interface DatasetRequest {
-  readonly name: 'social' | 'family' | 'metro' | 'network';
+  readonly name: 'social' | 'family' | 'metro' | 'network' | 'ontology';
   /** For `network`: the number of people (default 2,000). */
   readonly size?: number;
   /** The store to keep it in: `memory` (default, writable) or `csr` (read-only, compact). */
   readonly store?: 'memory' | 'csr';
+  /**
+   * Keep history. The network then comes with its growth (a commit per person) and the ontology with its six months
+   * of changes; other datasets start as one commit. Kept in memory (`store` is ignored).
+   */
+  readonly history?: boolean;
 }
 
 /** What loading a dataset did. */
@@ -32,6 +50,8 @@ export interface DatasetLoaded {
   /** Time to generate and load it, in milliseconds; 0 when the worker already held it. */
   readonly ms: number;
   readonly reused: boolean;
+  /** With history: the latest version. */
+  readonly version?: number;
 }
 
 export interface GraphStats {
@@ -57,5 +77,9 @@ export interface Overview {
 }
 
 export type Response =
-  | { readonly id: number; readonly ok: true; readonly result: CypherResult | GraphJSON | GraphStats | Overview | DatasetLoaded | null }
+  | {
+      readonly id: number;
+      readonly ok: true;
+      readonly result: CypherResult | GraphJSON | GraphStats | Overview | DatasetLoaded | readonly CommitInfo[] | GraphDiff | null;
+    }
   | { readonly id: number; readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly position?: unknown } };
