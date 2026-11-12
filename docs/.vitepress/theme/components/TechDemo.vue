@@ -423,9 +423,9 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
 <style scoped>
 .td { display: flex; flex-direction: column; gap: 12px; }
 .td-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
-.td-field { display: flex; flex-direction: column; gap: 4px; }
+.td-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
 .td-eyebrow { font-family: var(--vp-font-family-brand, 'Martian Mono', monospace); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--vp-c-text-2); }
-select, input[type='search'] { height: 36px; padding: 0 10px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); font: inherit; font-size: 14px; }
+select, input[type='search'] { height: 36px; padding: 0 10px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); font: inherit; font-size: 14px; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 2px; }
 .td-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; height: 36px; }
 .td-seg button { padding: 0 14px; font-weight: 500; font-size: 14px; color: var(--vp-c-text-2); }
