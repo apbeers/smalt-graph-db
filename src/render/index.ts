@@ -11,6 +11,7 @@ export type {
 } from './types.js';
 export { GpuUnavailableError, isWebGpuAvailable } from './gpu.js';
 export { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT } from './palette.js';
+export { resultsToGraph, defaultCaption, type ResultsGraph, type ResultsGraphOptions, type ResultNodeLike, type ResultRelLike } from './results.js';
 
 export async function createGraphView(canvas: HTMLCanvasElement, opts: GraphViewOptions = {}): Promise<GraphView> {
   const gpu = await initGpu(canvas);

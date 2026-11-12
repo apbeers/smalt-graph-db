@@ -77,6 +77,7 @@ export default defineConfig({
         text: 'Guide',
         items: [
           { text: 'Getting started', link: '/guide/getting-started' },
+          { text: 'Using the pieces', link: '/guide/modules' },
           { text: 'Examples', link: '/guide/examples' },
           { text: 'Sample data', link: '/guide/sample-data' },
           { text: 'Tech demo: big graphs', link: '/demo' },

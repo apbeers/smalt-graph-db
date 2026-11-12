@@ -39,11 +39,18 @@ interface CypherResult {
 
 ## Other entry points
 
+Each piece is its own entry point, and brings only what's beneath it: [Using the pieces](/guide/modules) shows each on
+its own.
+
 | Entry | Contents |
 | --- | --- |
-| `@smaltworks/smaltcy/engine` | The engine with no language: `GraphEngine`, the plan types and builders, stores, the function library |
+| `@smaltworks/smaltcy/engine` | The engine with no language: `GraphEngine`, plus the plan format, stores and function library re-exported |
 | `@smaltworks/smaltcy/plan` | The plan format, its builders and validator |
+| `@smaltworks/smaltcy/functions` | The function library, value comparisons, `registerFunction` and `registerAggregate` |
+| `@smaltworks/smaltcy/store` | `GraphStore`, `MemoryStore` and `CsrStore` |
 | `@smaltworks/smaltcy/cypher` | `compile`, `parse` and `bind`: Cypher to plans |
-| `@smaltworks/smaltcy/render` | The GPU graph view ([guide](/guide/rendering)) |
+| `@smaltworks/smaltcy/render` | The GPU graph view and `resultsToGraph` ([guide](/guide/rendering)) |
+| `@smaltworks/smaltcy/client` | `connect` and `GraphClient`, with no engine: for a page whose graph runs in a worker |
 | `@smaltworks/smaltcy/datasets` | The sample graphs: `social`, `family`, `metro`, `network` |
 | `@smaltworks/smaltcy/worker` | The worker script |
+| `@smaltworks/smaltcy/worker-runtime` | `createHandler`, to build a worker of your own |

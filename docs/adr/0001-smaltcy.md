@@ -17,7 +17,7 @@ graph, data in relational tables.
 
 1. **Name:** smaltcy (owner's choice). Repository `smalt-graph-db`; npm package `@smaltworks/smaltcy`.
 2. **Layers, as smaltdb has them:** a language (Cypher) makes plans; the engine runs plans and carries no language;
-   stores hold the graph. The engine never imports Cypher (`test/boundary.test.ts`).
+   stores hold the graph. The engine never imports Cypher (`test/modules.test.ts`).
 3. **A graph plan of its own,** in the shape of smaltdb's: immutable, JSON, versioned (`planVersion` 1), validated,
    with expressions that read rows by slot and call functions by name. `match` holds a pattern, not a traversal: the
    engine plans it from the store's statistics. The operations follow the research note's G2 (keyed recursion and

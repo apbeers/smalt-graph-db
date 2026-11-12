@@ -4,11 +4,11 @@
  * pattern: that's the engine's planner, from the store's statistics.
  */
 import { SmaltcyError } from '../errors.js';
-import { aggregateFunctions, scalarFunctions } from '../engine/functions.js';
+import { aggregateFunctions, scalarFunctions } from '../functions/library.js';
 import type { Expr as PExpr } from '../plan/expr.js';
 import { PLAN_VERSION, type AggCall, type GraphPlan, type Op, type Pattern, type PatternNode, type PatternPath, type PatternRel, type Projection as PProjection, type RemoveItem as PRemoveItem, type SetItem as PSetItem, type SortKey } from '../plan/ops.js';
 import type { Clause, Expr, PatternPart, Projection, ReturnItem, SetItem, Statement } from './ast.js';
-import { isAggregateName } from './parser.js';
+
 
 type Kind = 'node' | 'rel' | 'rels' | 'path' | 'value';
 
@@ -24,10 +24,22 @@ const semantic = (msg: string): never => {
   throw new SmaltcyError('SMALTCY_SEMANTIC', msg);
 };
 
-const FN_NAMES = new Map<string, string>();
-for (const name of scalarFunctions.keys()) FN_NAMES.set(name.toLowerCase(), name);
-const AGG_NAMES = new Map<string, string>();
-for (const name of aggregateFunctions.keys()) AGG_NAMES.set(name.toLowerCase(), name);
+/**
+ * Cypher's function names are case-insensitive. Looked up in the library each time (with a cache that's rebuilt when
+ * the library grows), so functions registered after this module loads are found too.
+ */
+function lookup(map: ReadonlyMap<string, unknown>, cache: { size: number; names: Map<string, string> }, name: string): string | undefined {
+  if (cache.size !== map.size) {
+    cache.names = new Map([...map.keys()].map((k) => [k.toLowerCase(), k]));
+    cache.size = map.size;
+  }
+  return cache.names.get(name.toLowerCase());
+}
+const fnCache = { size: -1, names: new Map<string, string>() };
+const aggCache = { size: -1, names: new Map<string, string>() };
+const scalarName = (name: string) => lookup(scalarFunctions, fnCache, name);
+const aggregateName = (name: string) => lookup(aggregateFunctions, aggCache, name);
+const isAggregateName = (name: string) => aggregateName(name) !== undefined;
 
 const COMPARE: Record<string, string> = { '=': 'eq', '<>': 'neq', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' };
 
@@ -368,7 +380,7 @@ class Binder {
 
   private extractAggregates(x: Expr, scope: Scope, aggs: AggCall[]): PExpr {
     if (x.t === 'call' && isAggregateName(x.name)) {
-      const fn = AGG_NAMES.get(x.name.toLowerCase())!;
+      const fn = aggregateName(x.name)!;
       if (x.args.some(hasAggregate)) semantic(`Can't nest aggregates: ${x.name}()`);
       if (x.star && fn !== 'count') semantic(`${x.name}(*) isn't a function`);
       const slot = this.slot(`  ${fn}${aggs.length}`);
@@ -470,7 +482,7 @@ class Binder {
           if (a.t === 'exists') return go(a);
           semantic('exists() takes a property or a pattern');
         }
-        let fn = FN_NAMES.get(lower);
+        let fn = scalarName(lower);
         if (!fn) return semantic(`Unknown function ${x.name}()`);
         if (fn === 'toString' && x.args.length === 1 && floatish(x.args[0]!)) fn = 'toString_float';
         return { k: 'call', fn, args: x.args.map((a) => go(a)) };

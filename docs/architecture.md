@@ -18,13 +18,35 @@ Plans built by programs or other languages ──────────┤
 Results ─→ GPU renderer: WebGPU compute layout, 2D and 3D drawing    src/render/
 ```
 
+Beneath the plan format is the function library (`src/functions/`): every operator and function a plan calls by
+name. The plan validator checks names against it, the engine calls it and Cypher's binder maps its syntax onto it.
+
+## Modules and their boundaries
+
+Each layer is a package entry point of its own, so it can be reused anywhere: [Using the pieces](/guide/modules) shows
+each on its own. The rules:
+
+| Layer | May import |
+| --- | --- |
+| `functions` | values and errors |
+| `plan` | functions |
+| `store` | values (the plan's types only) |
+| `engine` | plan, store, functions |
+| `cypher` | plan, functions; never the engine |
+| `render` | nothing: it draws any graph, and reads results by their shape (`resultsToGraph`) |
+| `client` | the worker protocol: never the engine, a language or the renderer |
+| `worker` | the engine and Cypher, behind a message protocol |
+
+`test/modules.test.ts` checks the imports of every file against this table, and bundles every entry point on its
+own to check what it pulls in.
+
 ## Language: Cypher
 
 A hand-written recursive-descent parser makes a syntax tree with source positions. The binder resolves variables to
 slots, checks scopes (`WITH` starts a new one), maps operators and functions onto the engine's library, and lays
 clauses out as plan operations. It doesn't choose how to run a pattern.
 
-The engine never imports the language: a test (`test/boundary.test.ts`) keeps it that way.
+The engine never imports the language: `test/modules.test.ts` keeps it that way.
 
 ## Plans
 

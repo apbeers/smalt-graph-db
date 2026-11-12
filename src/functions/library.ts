@@ -2,14 +2,28 @@
  * The function library: every operator and function a plan can call, by name. A language maps its syntax onto these
  * (Cypher's `+` is `add`, `toUpper()` is `toUpper`). Arguments arrive evaluated; NULL in gives NULL out unless a
  * function says otherwise.
+ *
+ * It sits below the plan format, the engine and the languages, and depends only on values: the plan validator checks
+ * names against it, the engine calls it, and a language's binder maps its syntax onto it. Add your own functions with
+ * `registerFunction` and `registerAggregate`; every language and plan sees them.
  */
 import { SmaltcyError } from '../errors.js';
-import type { GraphStore } from '../store/interface.js';
 import { NodeRef, PathRef, RelRef, isMap, typeName, type PropertyValue, type Value } from '../values.js';
 import { compare, equals, groupKey, orderCompare } from './compare.js';
 
+/** What graph functions (`labels()`, `type()`, `degree()` …) read: a subset of a store, so any store satisfies it. */
+export interface GraphReader {
+  labels(node: number): readonly string[];
+  nodeProperties(node: number): Readonly<Record<string, unknown>>;
+  relType(rel: number): string;
+  relStart(rel: number): number;
+  relEnd(rel: number): number;
+  relProperties(rel: number): Readonly<Record<string, unknown>>;
+  degree(node: number, dir: 'out' | 'in' | 'both', types: readonly string[] | null): number;
+}
+
 export interface FnContext {
-  readonly store: GraphStore;
+  readonly store: GraphReader;
 }
 
 export type ScalarFn = (args: readonly Value[], ctx: FnContext) => Value;
@@ -423,6 +437,21 @@ function stdev(population: boolean): AggregateDef {
       return st.n < 2 ? 0 : Math.sqrt(st.m2 / (st.n - 1));
     },
   };
+}
+
+/**
+ * Adds a scalar function every plan and language can call (Cypher: by name, any letter case). Replaces one of the
+ * same name. Names are the engine's: avoid the operators' (`eq`, `add` …) unless you mean to change them.
+ */
+export function registerFunction(name: string, def: ScalarDef): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(name)) throw new SmaltcyError('SMALTCY_UNSUPPORTED', `Bad function name ${JSON.stringify(name)}`);
+  scalarFunctions.set(name, def);
+}
+
+/** Adds an aggregate function, as `registerFunction` does for scalars. */
+export function registerAggregate(name: string, def: AggregateDef): void {
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(name)) throw new SmaltcyError('SMALTCY_UNSUPPORTED', `Bad aggregate name ${JSON.stringify(name)}`);
+  aggregateFunctions.set(name, def);
 }
 
 export const aggregateFunctions = new Map<string, AggregateDef>(

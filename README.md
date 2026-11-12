@@ -47,16 +47,28 @@ Cypher ─→ parser → binder ─→ graph plan (JSON) ─→ engine: match pl
 results ─→ GPU renderer (WebGPU: compute layout, 2D and 3D)
 ```
 
-| Directory | Contents |
-| --- | --- |
-| `src/cypher/` | The Cypher language: lexer, parser, binder |
-| `src/plan/` | The plan format, builders and validator |
-| `src/engine/` | The match planner, operators, function library, EXPLAIN, JSON import and export |
-| `src/store/` | The store interface, `MemoryStore` and `CsrStore` |
-| `src/render/` | The WebGPU graph view |
-| `src/worker/` | The Web Worker and its client |
-| `src/datasets/` | Sample graphs |
-| `docs/` | The site: guide, references and the playground |
+## Using the pieces
+
+Each part is its own entry point, made to be used on its own: import one, and your bundle holds it and what's beneath
+it, nothing more. [Using the pieces](docs/guide/modules.md) has a working example of each; `test/modules.test.ts`
+keeps the boundaries.
+
+| Entry point (`@smaltworks/smaltcy…`) | Source | Use it to | Depends on |
+| --- | --- | --- | --- |
+| `.` | `src/index.ts` | Query with Cypher: `open()` | everything below but the renderer |
+| `/cypher` | `src/cypher/` | Turn Cypher into plans (lexer, parser, binder) | plan, functions |
+| `/engine` | `src/engine/` | Run plans: match planner, operators, EXPLAIN, JSON import and export | plan, store, functions |
+| `/plan` | `src/plan/` | Build, check and send plans | functions |
+| `/store` | `src/store/` | Use or write a memory structure | — |
+| `/functions` | `src/functions/` | The function library; add your own | — |
+| `/render` | `src/render/` | Draw any graph with WebGPU, 2D and 3D | — |
+| `/client` | `src/client/` | Talk to a graph in a Web Worker (about 3 KB) | — |
+| `/worker` | `src/worker/worker.ts` | The worker script | the engine and Cypher |
+| `/worker-runtime` | `src/worker/runtime.ts` | `createHandler`, for a worker of your own | the engine and Cypher |
+| `/datasets` | `src/datasets/` | Sample graphs | — |
+
+The site (`docs/`) is built from the same pieces: the playground, the runnable examples and the tech demo use the
+client, the worker and the renderer, as any app would.
 
 ## Development
 

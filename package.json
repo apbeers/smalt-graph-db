@@ -46,6 +46,14 @@
       "types": "./dist/types/plan/index.d.ts",
       "default": "./dist/plan.js"
     },
+    "./functions": {
+      "types": "./dist/types/functions/index.d.ts",
+      "default": "./dist/functions.js"
+    },
+    "./store": {
+      "types": "./dist/types/store/index.d.ts",
+      "default": "./dist/store.js"
+    },
     "./cypher": {
       "types": "./dist/types/cypher/index.d.ts",
       "default": "./dist/cypher.js"
@@ -54,7 +62,19 @@
       "types": "./dist/types/render/index.d.ts",
       "default": "./dist/render.js"
     },
+    "./client": {
+      "types": "./dist/types/client/index.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./datasets": {
+      "types": "./dist/types/datasets/index.d.ts",
+      "default": "./dist/datasets.js"
+    },
     "./worker": "./dist/smaltcy-worker.js",
+    "./worker-runtime": {
+      "types": "./dist/types/worker/runtime.d.ts",
+      "default": "./dist/worker-runtime.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

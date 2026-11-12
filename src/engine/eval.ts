@@ -4,14 +4,17 @@
 import { SmaltcyError } from '../errors.js';
 import type { Expr } from '../plan/expr.js';
 import type { Op } from '../plan/ops.js';
+import type { GraphStore } from '../store/interface.js';
 import { NodeRef, RelRef, isMap, typeName, type Value } from '../values.js';
-import { equals } from './compare.js';
-import { scalarFunctions, type FnContext } from './functions.js';
+import { equals } from '../functions/compare.js';
+import { scalarFunctions, type FnContext } from '../functions/library.js';
 
 export type Row = Value[];
 export type Compiled = (row: Row) => Value;
 
 export interface EvalContext extends FnContext {
+  /** The engine reads more of the store than functions do. */
+  readonly store: GraphStore;
   readonly params: Readonly<Record<string, Value>>;
   /** Runs a nested plan from `row`, calling `emit` with each of its rows until it returns false. */
   runNested(plan: Op, row: Row, emit: (r: Row) => boolean): void;

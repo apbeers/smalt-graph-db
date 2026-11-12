@@ -1,6 +1,7 @@
 // Query results to a graph the renderer draws: every node, relationship and path in the rows. Shared by the playground,
 // the runnable examples and the tech demo.
-import type { RenderGraph } from '../../../src/render/index'
+import { defaultCaption, resultsToGraph } from '../../../src/render/results'
+import type { RenderGraph } from '../../../src/render/types'
 
 export interface GNode {
   id: number
@@ -23,37 +24,17 @@ export interface Drawn {
 }
 
 export function caption(props: Record<string, unknown>, labels: readonly string[], id: number): string {
-  for (const k of ['name', 'title', 'label', 'code']) if (props[k] != null) return String(props[k])
-  return labels[0] ? `${labels[0]} ${id}` : String(id)
+  return defaultCaption({ kind: 'node', id, labels, properties: props })
 }
 
-/** Every node, relationship and path in the rows; null when there are none. */
+/** Every node, relationship and path in the rows (the renderer's resultsToGraph); null when there are none. */
 export function collect(rows: readonly (readonly unknown[])[]): Drawn | null {
-  const nodes = new Map<number, GNode>()
-  const edges = new Map<number, GEdge>()
-  const visit = (v: unknown): void => {
-    if (v === null || typeof v !== 'object') return
-    if (Array.isArray(v)) return v.forEach(visit)
-    const o = v as { kind?: string }
-    if (o.kind === 'node') {
-      const n = v as { id: number; labels: string[]; properties: Record<string, unknown> }
-      nodes.set(n.id, { id: n.id, labels: [...n.labels], properties: n.properties, caption: caption(n.properties, n.labels, n.id) })
-    } else if (o.kind === 'relationship') {
-      const r = v as GEdge
-      edges.set(r.id, { id: r.id, type: r.type, start: r.start, end: r.end, properties: r.properties })
-    } else if (o.kind === 'path') {
-      const p = v as { nodes: unknown[]; relationships: unknown[] }
-      p.nodes.forEach(visit)
-      p.relationships.forEach(visit)
-    } else Object.values(v).forEach(visit)
+  const r = resultsToGraph(rows)
+  if (r.nodes.length === 0) return null
+  return {
+    nodes: r.nodes.map((n) => ({ id: n.id as number, labels: [...n.labels], properties: { ...n.properties }, caption: defaultCaption(n) })),
+    edges: r.relationships.map((e) => ({ id: e.id as number, type: e.type, start: e.start as number, end: e.end as number, properties: { ...e.properties } })),
   }
-  rows.forEach(visit)
-  if (nodes.size === 0) return null
-  // Relationships whose ends aren't in the rows still show, with their ends as plain nodes.
-  for (const e of edges.values()) {
-    for (const id of [e.start, e.end]) if (!nodes.has(id)) nodes.set(id, { id, labels: [], properties: {}, caption: String(id) })
-  }
-  return { nodes: [...nodes.values()], edges: [...edges.values()] }
 }
 
 export function toRender(d: Drawn): RenderGraph {

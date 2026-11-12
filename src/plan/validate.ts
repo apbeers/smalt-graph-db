@@ -4,7 +4,7 @@
  * SMALTCY_PLAN, not as a wrong answer.
  */
 import { SmaltcyError } from '../errors.js';
-import { aggregateFunctions, scalarFunctions } from '../engine/functions.js';
+import { aggregateFunctions, scalarFunctions } from '../functions/library.js';
 import { forEachChild, slotsRead, type Expr } from './expr.js';
 import { PLAN_VERSION, boundSlots, exprsOf, inputs, type GraphPlan, type Op, type Pattern } from './ops.js';
 

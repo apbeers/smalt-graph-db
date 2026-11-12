@@ -26,7 +26,13 @@ Playwright is installed globally in the cloud containers; don't run `playwright 
 
 ## Layers and rules
 
-- `src/engine`, `src/plan` and `src/store` never import `src/cypher` or `src/render` (`test/boundary.test.ts`).
+- **Modular:** each part of `src/` is a package entry point meant to be reused on its own (`docs/guide/modules.md`).
+  `test/modules.test.ts` holds the table of which layer may import which, and bundles every entry point on its own
+  to check what it pulls in. A new dependency between layers changes that table on purpose, never by accident. The
+  renderer imports nothing else; the client carries no engine; Cypher never imports the engine.
+- A new entry point goes in `package.json` `exports`, `scripts/build.mjs`, the `tsconfig.json` and `vitest.config.ts`
+  aliases, the table in `docs/guide/modules.md` and the README. The TypeScript examples in that guide are type-checked
+  (`test/docs-ts.test.ts`).
 - Plans say what, never how: no store names or traversal orders in the plan format. The match planner decides.
 - A new store passes `test/store-conformance.test.ts`, the Cypher suites (`describe.each` over stores) and the
   differential test.

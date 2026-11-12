@@ -157,8 +157,6 @@ export function lex(src: string): Token[] {
   return out;
 }
 
-const AGGREGATES = new Set(['count', 'sum', 'avg', 'min', 'max', 'collect', 'stdev', 'stdevp']);
-export const isAggregateName = (name: string) => AGGREGATES.has(name.toLowerCase());
 
 const CLAUSE_START = new Set(['MATCH', 'OPTIONAL', 'UNWIND', 'WITH', 'RETURN', 'CREATE', 'MERGE', 'SET', 'REMOVE', 'DELETE', 'DETACH', 'UNION']);
 

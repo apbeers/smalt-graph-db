@@ -11,9 +11,9 @@ import { slotsRead, type Expr } from '../plan/expr.js';
 import { boundSlots, type Op, type Pattern, type QueryPlan, type RemoveItem, type SetItem } from '../plan/ops.js';
 import type { GraphStore, WritableStore } from '../store/interface.js';
 import { NodeRef, PathRef, RelRef, isMap, typeName, type PropertyValue, type Value } from '../values.js';
-import { equals, groupKey, orderCompare, rowKey } from './compare.js';
+import { equals, groupKey, orderCompare, rowKey } from '../functions/compare.js';
 import { compileExpr, truth, type Compiled, type EvalContext, type Row } from './eval.js';
-import { aggregateFunctions, distinctAggregate, toPropertyValue } from './functions.js';
+import { aggregateFunctions, distinctAggregate, toPropertyValue } from '../functions/library.js';
 import { planMatch, type MatchPlan, type MatchStep } from './match-planner.js';
 
 export type Sink = (row: Row) => boolean;
