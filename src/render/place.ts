@@ -162,3 +162,41 @@ export function placeNodes(
   }
   return { pos, src, offset, seeded };
 }
+
+/** Mobility of nodes this many hops or more from a change. */
+export const MOBILITY_FLOOR = 0.08;
+
+/**
+ * Mobility after a small change: the nodes in `touched` take the full force, and it halves with
+ * every hop further out, down to MOBILITY_FLOOR, so the layout settles the change locally and the
+ * rest of the drawing holds still.
+ */
+export function mobilityAround(n: number, csr: Csr, touched: readonly number[], out?: Float32Array): Float32Array {
+  const mob = out && out.length >= n ? out : new Float32Array(n);
+  const hops = new Int32Array(n).fill(-1);
+  const queue = new Uint32Array(n);
+  let head = 0, tail = 0;
+  for (const i of touched) {
+    if (i >= 0 && i < n && hops[i] < 0) {
+      hops[i] = 0;
+      queue[tail++] = i;
+    }
+  }
+  const { offsets, neighbors } = csr;
+  const maxHops = Math.ceil(Math.log2(1 / MOBILITY_FLOOR)) + 1;
+  while (head < tail) {
+    const a = queue[head++]!;
+    if (hops[a]! >= maxHops) continue;
+    for (let k = offsets[a]!; k < offsets[a + 1]!; k++) {
+      const j = neighbors[k]!;
+      if (hops[j]! >= 0) continue;
+      hops[j] = hops[a]! + 1;
+      queue[tail++] = j;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const h = hops[i]!;
+    mob[i] = h < 0 ? MOBILITY_FLOOR : Math.max(MOBILITY_FLOOR, Math.pow(0.5, h));
+  }
+  return mob;
+}

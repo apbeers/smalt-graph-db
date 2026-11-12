@@ -8,19 +8,24 @@ import { createGraphView, GpuUnavailableError, type GraphView, type RenderGraph 
 import { EXAMPLES, type DatasetKey } from './examples'
 import GraphControls from './GraphControls.vue'
 import { collect as collectRows, decodeCode, fmt, toRender as toRenderGraph, type GEdge, type GNode } from '../graph-results'
+import { createTimeline, type Timeline, type TimelineCommit } from '../../../../src/timeline/index'
+import { Scrubber, VersionedDrawing } from '../versioned-drawing'
 
 type Row = readonly unknown[]
 interface Hit { kind: 'node' | 'edge'; index: number }
 
 const { isDark } = useData()
 
-// Generated in the engine's worker (DatasetRequest), so large ones don't hold up the page.
+// Generated in the engine's worker (DatasetRequest), so large ones don't hold up the page. Every dataset keeps its
+// history: the ontology and the networks come with their past, the rest start as one commit, and every write you run
+// adds a version to the timeline.
 const DATASETS: Record<DatasetKey, { title: string; req: DatasetRequest }> = {
-  social: { title: 'Social: people, cities, topics', req: { name: 'social' } },
-  family: { title: 'The smalt family', req: { name: 'family' } },
-  metro: { title: 'Metro: 8 lines, ~240 stations', req: { name: 'metro' } },
-  network: { title: 'Network: 5,000 people', req: { name: 'network', size: 5000 } },
-  big: { title: 'Network: 20,000 people', req: { name: 'network', size: 20000 } },
+  social: { title: 'Social: people, cities, topics', req: { name: 'social', history: true } },
+  family: { title: 'The smalt family', req: { name: 'family', history: true } },
+  metro: { title: 'Metro: 8 lines, ~240 stations', req: { name: 'metro', history: true } },
+  ontology: { title: 'Ontology: a data platform over six months', req: { name: 'ontology', history: true } },
+  network: { title: 'Network: 5,000 people, as it grew', req: { name: 'network', size: 5000, history: true } },
+  big: { title: 'Network: 20,000 people, as it grew', req: { name: 'network', size: 20000, history: true } },
 }
 
 const dataset = ref<DatasetKey>('social')
@@ -44,6 +49,56 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 let client: GraphClient | null = null
 let view: GraphView | null = null
 let statsTimer = 0
+/** The timeline under the drawing, and the drawing it moves: the whole graph at the version it shows. */
+const tlHost = ref<HTMLElement | null>(null)
+let timeline: Timeline | null = null
+const drawing = new VersionedDrawing()
+const latest = ref(0)
+const viewing = ref(0)
+/** True while the drawing is the whole graph (which the timeline moves); false while it shows a query's result. */
+let wholeGraph = false
+const scrubber = new Scrubber(drawing, (a, b) => client!.diff(a, b), (changed) => {
+  syncFromDrawing()
+  view?.setGraph(drawing.render(), { keepPositions: true, animate: true, changed })
+})
+
+/** The panels' copy of what's drawn, in drawing order (hover and click find nodes by index). */
+function syncFromDrawing() {
+  drawing.render()
+  gNodes = drawing.order.map((id) => {
+    const n = drawing.nodes.get(id)!
+    return { id, labels: [...n.labels], properties: {}, caption: n.caption }
+  })
+  gEdges = [...drawing.rels].map(([id, r]) => ({ id, type: r.type, start: r.start, end: r.end, properties: {} }))
+}
+
+const toTimeline = (c: { version: number; time: number; author?: string; message?: string; size: number }): TimelineCommit => ({ version: c.version, time: c.time, author: c.author, message: c.message, size: c.size })
+
+/** Brings the timeline up to date with the graph's commits; `follow` keeps it at the end if it was there. */
+async function refreshTimeline(follow: boolean) {
+  if (!client) return
+  const commits = (await client.commits()).map(toTimeline)
+  latest.value = commits.length ? commits[commits.length - 1]!.version : 0
+  if (!timeline && tlHost.value) {
+    timeline = createTimeline(tlHost.value, { commits, value: latest.value, theme: isDark.value ? 'dark' : 'light', onChange: (v) => void moveTo(v) })
+  } else timeline?.setCommits(commits, { follow })
+  if (!follow) timeline?.setValue(latest.value)
+  viewing.value = timeline?.value ?? latest.value
+}
+
+/** The timeline moved: redraw the whole graph at that version, by diffs from what's drawn. */
+async function moveTo(v: number) {
+  viewing.value = v
+  if (!client) return
+  if (!wholeGraph) return void showOverview(v)
+  scrubber.to(v)
+}
+
+/** Puts `AT VERSION n` before the query, to query the version the timeline shows. */
+function queryThisVersion() {
+  query.value = `AT VERSION ${viewing.value}\n` + query.value.replace(/^\s*AT\s+(VERSION|TIME)\s+\S+\s*/i, '')
+}
+
 /** The query a link opened the playground with, until its dataset has loaded. */
 let initial: string | null = null
 let runAfterLoad = false
@@ -73,7 +128,8 @@ async function loadDataset() {
   try {
     const t0 = performance.now()
     const st = await client.dataset(DATASETS[dataset.value].req)
-    status.value = `${st.nodes.toLocaleString()} nodes, ${st.relationships.toLocaleString()} relationships, loaded in ${Math.round(performance.now() - t0)} ms`
+    status.value = `${st.nodes.toLocaleString()} nodes, ${st.relationships.toLocaleString()} relationships, ${(st.version ?? 0).toLocaleString()} versions, loaded in ${Math.round(performance.now() - t0)} ms`
+    await refreshTimeline(false)
     await showOverview()
     if (initial !== null) {
       query.value = initial
@@ -94,16 +150,14 @@ async function loadDataset() {
   }
 }
 
-/** Draws the whole graph. */
-async function showOverview() {
+/** Draws the whole graph: at the version the timeline shows, the latest by default. */
+async function showOverview(version = viewing.value) {
   if (!client) return
-  const ov = await client.overview()
-  gNodes = ov.ids.map((id, i) => ({ id, labels: ov.labels[i] ? [ov.labels[i]!] : [], properties: {}, caption: ov.captions[i] || `${ov.labels[i]} ${id}` }))
-  gEdges = []
-  for (let i = 0; i < ov.edgeTypes.length; i++) {
-    gEdges.push({ id: -1 - i, type: ov.edgeTypes[i]!, start: ov.ids[ov.edges[2 * i]!]!, end: ov.ids[ov.edges[2 * i + 1]!]!, properties: {} })
-  }
-  view?.setGraph(toRender())
+  const ov = await client.overview(undefined, version === latest.value ? {} : { asOf: version })
+  drawing.reset(ov, version)
+  wholeGraph = true
+  syncFromDrawing()
+  view?.setGraph(drawing.render())
   view?.fit()
 }
 
@@ -134,8 +188,14 @@ async function run() {
     } catch {
       planText.value = ''
     }
-    if (wrote.length) await showOverview()
-    else if (collect(r.rows as Row[])) {
+    if (wrote.length) {
+      // A write is a new version: the timeline grows, and the drawing moves to it.
+      const wasLatest = viewing.value === latest.value
+      await refreshTimeline(wasLatest)
+      if (wasLatest && wholeGraph) await moveTo(latest.value)
+      else if (wasLatest) await showOverview(latest.value)
+    } else if (collect(r.rows as Row[])) {
+      wholeGraph = false
       view?.setGraph(toRender(), { keepPositions: true })
       view?.fit()
     }
@@ -201,7 +261,10 @@ function pick(ex: { query: string }) {
 
 watch(mode, (m) => view?.setMode(m))
 watch(labels, (on) => view?.setLabels(on))
-watch(isDark, (d) => view?.setTheme(d ? 'dark' : 'light'))
+watch(isDark, (d) => {
+  view?.setTheme(d ? 'dark' : 'light')
+  timeline?.setTheme(d ? 'dark' : 'light')
+})
 watch(search, (s) => {
   if (!view) return
   if (!s.trim()) view.highlight(null)
@@ -256,6 +319,7 @@ function onPointer(e: PointerEvent) {
 }
 
 onBeforeUnmount(() => {
+  timeline?.destroy()
   clearInterval(statsTimer)
   view?.destroy()
   client?.close()
@@ -337,13 +401,20 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="pg-view" @pointermove="onPointer" @pointerleave="hover = null">
-        <canvas ref="canvas" class="pg-canvas" />
-        <div v-if="gpuError" class="pg-gpu">{{ gpuError }}</div>
-        <div v-if="hover" class="pg-tip" :style="{ left: hover.x + 14 + 'px', top: hover.y + 14 + 'px' }">{{ hover.text }}</div>
-        <div class="pg-stats">{{ statsText }}</div>
-        <GraphControls v-if="!gpuError" :mode="mode" />
-      </section>
+      <div class="pg-right">
+        <section class="pg-view" @pointermove="onPointer" @pointerleave="hover = null">
+          <canvas ref="canvas" class="pg-canvas" />
+          <div v-if="gpuError" class="pg-gpu">{{ gpuError }}</div>
+          <div v-if="hover" class="pg-tip" :style="{ left: hover.x + 14 + 'px', top: hover.y + 14 + 'px' }">{{ hover.text }}</div>
+          <div class="pg-stats">{{ statsText }}</div>
+          <GraphControls v-if="!gpuError" :mode="mode" />
+        </section>
+        <div v-if="viewing !== latest" class="pg-past" role="status">
+          <span>Showing version {{ viewing.toLocaleString() }} of {{ latest.toLocaleString() }}. Queries read the latest version.</span>
+          <button class="pg-ghost" @click="queryThisVersion">Query this version</button>
+        </div>
+        <div ref="tlHost" class="pg-timeline" />
+      </div>
     </div>
   </div>
 </template>
@@ -392,6 +463,10 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .pg-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; margin: 8px 0 12px; }
 .pg-details dt { font-family: var(--vp-font-family-mono); color: var(--vp-c-text-2); }
 .pg-details dd { margin: 0; font-family: var(--vp-font-family-mono); overflow-wrap: anywhere; }
+.pg-right { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.pg-right .pg-view { flex: 1; }
+.pg-past { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 10px; border: 1px solid var(--vp-c-divider); border-radius: 8px; font-size: 13px; color: var(--vp-c-text-2); }
+.pg-past .pg-ghost { height: 30px; }
 .pg-view { position: relative; border: 1px solid var(--vp-c-divider); border-radius: 10px; overflow: hidden; background: var(--vp-c-bg-alt); min-height: 420px; }
 .pg-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .pg-gpu { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--vp-c-text-2); }

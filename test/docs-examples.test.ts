@@ -43,10 +43,15 @@ describe('docs examples', () => {
 });
 
 describe('playground examples', () => {
-  const data: Record<DatasetKey, () => ReturnType<typeof social>> = { social, family, metro, network: () => network(800), big: () => network(800) };
+  // As the playground loads them: every dataset keeps its history; the networks with their growth.
+  const data: Record<DatasetKey, () => ReturnType<typeof social>> = {
+    social, family, metro, ontology,
+    network: () => network(800, 42, { history: true }),
+    big: () => network(800, 42, { history: true }),
+  };
   const cases = (Object.keys(EXAMPLES) as DatasetKey[]).flatMap((k) => EXAMPLES[k].map((ex) => [k, ex.title, ex.query] as const));
   test.each(cases)('%s: %s', (k, _title, query) => {
-    const g = open();
+    const g = open({ history: true });
     g.load(data[k]());
     const r = g.run(query);
     // Every example shows something.

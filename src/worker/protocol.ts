@@ -71,6 +71,8 @@ export interface Overview {
   /** Pairs of indexes into `ids`. */
   readonly edges: number[];
   readonly edgeTypes: string[];
+  /** Each edge's relationship id, for matching it to later diffs. */
+  readonly relIds: number[];
   readonly truncated: boolean;
   /** Time the worker spent building it, in milliseconds. */
   readonly ms: number;

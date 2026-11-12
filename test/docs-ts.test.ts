@@ -25,7 +25,7 @@ test('the modules guide type-checks', () => {
   expect(files.length).toBeGreaterThanOrEqual(7);
   const root = resolve('.');
   const paths: Record<string, string[]> = { '@smaltworks/smaltcy': [`${root}/src/index.ts`] };
-  for (const e of ['engine', 'plan', 'functions', 'store', 'history', 'cypher', 'render', 'client', 'datasets']) paths[`@smaltworks/smaltcy/${e}`] = [`${root}/src/${e}/index.ts`];
+  for (const e of ['engine', 'plan', 'functions', 'store', 'history', 'cypher', 'render', 'timeline', 'client', 'datasets']) paths[`@smaltworks/smaltcy/${e}`] = [`${root}/src/${e}/index.ts`];
   paths['@smaltworks/smaltcy/worker-runtime'] = [`${root}/src/worker/runtime.ts`];
   writeFileSync(
     join(dir, 'tsconfig.json'),

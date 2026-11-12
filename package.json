@@ -66,6 +66,10 @@
       "types": "./dist/types/render/index.d.ts",
       "default": "./dist/render.js"
     },
+    "./timeline": {
+      "types": "./dist/types/timeline/index.d.ts",
+      "default": "./dist/timeline.js"
+    },
     "./client": {
       "types": "./dist/types/client/index.d.ts",
       "default": "./dist/client.js"

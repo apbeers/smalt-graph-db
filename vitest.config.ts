@@ -8,7 +8,7 @@ export default defineConfig({
     alias: [
       { find: /^@smaltworks\/smaltcy$/, replacement: src('index.ts') },
       { find: /^@smaltworks\/smaltcy\/worker-runtime$/, replacement: src('worker/runtime.ts') },
-      { find: /^@smaltworks\/smaltcy\/(engine|plan|cypher|render|datasets|functions|store|history|client)$/, replacement: src('$1/index.ts') },
+      { find: /^@smaltworks\/smaltcy\/(engine|plan|cypher|render|datasets|functions|store|history|timeline|client)$/, replacement: src('$1/index.ts') },
     ],
   },
   test: {

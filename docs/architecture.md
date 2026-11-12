@@ -35,6 +35,7 @@ each on its own. The rules:
 | `history` | store (a history is a store that wraps another) |
 | `cypher` | plan, functions; never the engine |
 | `render` | nothing: it draws any graph, and reads results by their shape (`resultsToGraph`) |
+| `timeline` | nothing: it shows commits and reports a version |
 | `client` | the worker protocol: never the engine, a language or the renderer |
 | `worker` | the engine and Cypher, behind a message protocol |
 

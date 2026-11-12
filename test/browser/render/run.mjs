@@ -488,12 +488,12 @@ async function main() {
 
     // ---- animated transitions -----------------------------------------------------------------
     console.log('Transitions (setGraph with animate)');
-    // How far a 12×12 px patch of the page at a canvas point differs from the page's background.
+    // How many pixels of the 6×6 px patch at a canvas point (a node's core) are drawn on, not page background.
     const patchInk = async (p) => {
-      const png = await page.screenshot({ clip: { x: box.x + p.x - 6, y: box.y + p.y - 6, width: 12, height: 12 } });
+      const png = await page.screenshot({ clip: { x: box.x + p.x - 3, y: box.y + p.y - 3, width: 6, height: 6 } });
       const { rgba } = decodePng(png);
       let ink = 0;
-      for (let i = 0; i < rgba.length; i += 4) ink = Math.max(ink, Math.abs(rgba[i] - 0xf5) + Math.abs(rgba[i + 1] - 0xf6) + Math.abs(rgba[i + 2] - 0xf8));
+      for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 0xf5) + Math.abs(rgba[i + 1] - 0xf6) + Math.abs(rgba[i + 2] - 0xf8) > 60) ink++;
       return ink;
     };
     await page.evaluate(async () => {
@@ -554,16 +554,26 @@ async function main() {
         ty += (p1[i * 3 + 1] - p0[i * 3 + 1]) / 48;
       }
       const shifts = [];
-      for (let i = 0; i < 48; i++) shifts.push(Math.hypot(p1[i * 3] - p0[i * 3] - tx, p1[i * 3 + 1] - p0[i * 3 + 1] - ty) * k);
+      let anchors = 0;
+      for (let i = 0; i < 48; i++) {
+        const d = Math.hypot(p1[i * 3] - p0[i * 3] - tx, p1[i * 3 + 1] - p0[i * 3 + 1] - ty) * k;
+        // The two nodes the new ones hang from take their springs; the rest should hold still.
+        if (i === 47 || i === 30) anchors = Math.max(anchors, d);
+        else shifts.push(d);
+      }
       shifts.sort((x, y) => x - y);
-      return { hits, settled: settled.settled, median: shifts[24], max: shifts[47], drift: Math.hypot(tx, ty) * k, startGap: Math.hypot(near.x - anchor.x, near.y - anchor.y) };
+      return { hits, settled: settled.settled, median: shifts[23], max: shifts[45], anchors, drift: Math.hypot(tx, ty) * k, startGap: Math.hypot(near.x - anchor.x, near.y - anchor.y) };
     }, add.p0);
     check(added.hits.every(Boolean), `new nodes are drawn and picked after the transition (${added.hits})`);
     check(added.startGap < 120, `a new node starts next to its neighbour (${added.startGap.toFixed(0)} px away)`);
-    check(added.settled && added.median < 2 && added.max < 8, `adding 2 nodes barely moves the rest (median ${added.median.toFixed(2)} px, max ${added.max.toFixed(1)} px, drift ${added.drift.toFixed(1)} px)`);
+    check(added.settled && added.median < 2 && added.max < 6, `adding 2 nodes barely moves the rest (median ${added.median.toFixed(2)} px, max ${added.max.toFixed(1)} px; their 2 neighbours ${added.anchors.toFixed(1)} px; drift ${added.drift.toFixed(1)} px)`);
 
     // Removal: a leaf goes; it is no longer picked at once, and gone from the drawing after the transition.
+    // A key press first, so that the camera stops following the drawing's bounds (it would move the patch).
+    await page.locator('canvas').focus();
+    await page.keyboard.press('ArrowLeft');
     const leaf = await page.evaluate(async () => {
+      await window.waitFrames(20);
       const view = window.view;
       await view.sync();
       return view.screenPosition(46);
@@ -596,7 +606,8 @@ async function main() {
       await window.waitFrames(3);
     });
     const inkAfter = await patchInk(leaf);
-    check(inkBefore > 60 && inkAfter < 20, `a removed node is gone from the drawing after the transition (ink ${inkBefore} → ${inkAfter})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-out-after.png') });
+    check(inkBefore >= 30 && inkAfter <= 6, `a removed node is gone from the drawing after the transition (${inkBefore} → ${inkAfter} of 36 pixels drawn)`);
 
     // A property change flashes a ring.
     await page.evaluate(async () => {

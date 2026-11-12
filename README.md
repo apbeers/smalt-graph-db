@@ -64,6 +64,7 @@ keeps the boundaries.
 | `/history` | `src/history/` | Keep every version: time travel, diffs | store |
 | `/functions` | `src/functions/` | The function library; add your own | — |
 | `/render` | `src/render/` | Draw any graph with WebGPU, 2D and 3D | — |
+| `/timeline` | `src/timeline/` | A timeline over a graph's versions | — |
 | `/client` | `src/client/` | Talk to a graph in a Web Worker (about 3 KB) | — |
 | `/worker` | `src/worker/worker.ts` | The worker script | the engine and Cypher |
 | `/worker-runtime` | `src/worker/runtime.ts` | `createHandler`, for a worker of your own | the engine and Cypher |

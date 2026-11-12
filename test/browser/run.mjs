@@ -5,4 +5,5 @@ const run = (file, ...args) => execFileSync(process.execPath, [file, ...args], {
 const argv = process.argv.slice(2);
 const args = [...(argv.includes('--shots') ? ['--shots', argv[argv.indexOf('--shots') + 1]] : []), ...(argv.includes('--quick') ? ['--quick'] : [])];
 run('test/browser/render/run.mjs', ...args);
+run('test/browser/timeline/run.mjs');
 run('test/browser/playground.mjs', ...args);

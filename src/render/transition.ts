@@ -98,6 +98,8 @@ export interface UpdateResult {
   edgesRemoved: number;
   /** Ghost edge endpoints as slots of the new buffer: [s0, t0, s1, t1, …]. */
   ghostEnds: Uint32Array;
+  /** Nodes (new indices) next to a change: added nodes and the live ends of added and removed edges. */
+  touched: number[];
 }
 
 export class Transitions {
@@ -144,6 +146,7 @@ export class Transitions {
     const start = new Float32Array(n);
     const revived = new Set<number>();
     let added = 0;
+    const touched: number[] = [];
     for (let i = 0; i < n; i++) {
       const id = nodes[i]!.id;
       ids[i] = id;
@@ -171,6 +174,7 @@ export class Transitions {
       }
       src[i] = NONE;
       added++;
+      touched.push(i);
       if (animate) {
         kind[i] = ANIM_ENTER;
         start[i] = now;
@@ -232,6 +236,8 @@ export class Transitions {
         continue;
       }
       edgesAdded++;
+      const e = edges[k]!;
+      touched.push(e.source, e.target);
       if (!animate) continue;
       const g = ghostEdgeIndex.get(key);
       ekind[k] = ANIM_ENTER;
@@ -252,6 +258,9 @@ export class Transitions {
       const key = this.keys[k]!;
       if (key === '' || keySet.has(key) || oldKeys.get(key) !== k) continue;
       edgesRemoved++;
+      const s0 = index.get(this.ends[k * 2]!), t0 = index.get(this.ends[k * 2 + 1]!);
+      if (s0 !== undefined) touched.push(s0);
+      if (t0 !== undefined) touched.push(t0);
       if (!animate) continue;
       const s = this.edgeKind[k] === ANIM_ENTER ? exitStartFromEnter(now, this.edgeStart[k]!) : now;
       gedges.push({ key, source: this.ends[k * 2]!, target: this.ends[k * 2 + 1]!, start: s });
@@ -292,7 +301,7 @@ export class Transitions {
       for (const g of kept) until = Math.max(until, g.start + EXIT_MS);
     }
     this.until = until > now ? until : 0;
-    return { src, added, removed, edgesAdded, edgesRemoved, ghostEnds: this.ghostEnds };
+    return { src, added, removed, edgesAdded, edgesRemoved, ghostEnds: this.ghostEnds, touched };
   }
 
   /** Whether an animation is still running at `now`. */

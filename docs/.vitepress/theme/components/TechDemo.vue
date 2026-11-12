@@ -6,13 +6,16 @@ import { useData } from 'vitepress'
 import { connect, type GraphClient } from '../../../../src/worker/client'
 import { createGraphView, GpuUnavailableError, type GraphView } from '../../../../src/render/index'
 import GraphControls from './GraphControls.vue'
+import { createTimeline, type Timeline } from '../../../../src/timeline/index'
+import { Scrubber, VersionedDrawing } from '../versioned-drawing'
 
 const { isDark } = useData()
 
 const SIZES = [10_000, 25_000, 50_000, 100_000]
 // 10,000 by default: it lays out quickly on most GPUs. The larger sizes are a click away.
 const size = ref(10_000)
-const store = ref<'memory' | 'csr'>('csr')
+// 'history': a MemoryStore with the network's growth, a commit per person, and the timeline to scrub through it.
+const store = ref<'history' | 'memory' | 'csr'>('history')
 const mode = ref<'2d' | '3d'>('2d')
 const labels = ref(false)
 const search = ref('')
@@ -41,6 +44,32 @@ let timer = 0
 /** Engine id → index in the drawing. */
 let indexOf = new Map<number, number>()
 
+/** The drawing at the version the timeline shows, coloured by community. */
+const drawing = new VersionedDrawing((labels, community) => (labels.includes('City') ? 'City' : `Community ${community ?? ''}`), 'community')
+const tlHost = ref<HTMLElement | null>(null)
+let timeline: Timeline | null = null
+const latest = ref(0)
+const viewing = ref(0)
+const scrubMs = ref(0)
+const scrubber = new Scrubber(
+  drawing,
+  async (a, b) => {
+    const t0 = performance.now()
+    const d = await client!.diff(a, b)
+    scrubMs.value = performance.now() - t0
+    return d
+  },
+  (changed) => drawNow({ animate: true, changed }),
+)
+
+/** Draws the drawing; the index of engine ids follows its order, for highlighting. */
+function drawNow(opts: { animate?: boolean; changed?: number[] } = {}) {
+  if (!view) return
+  const g = drawing.render()
+  indexOf = new Map(drawing.order.map((id, i) => [id, i]))
+  view.setGraph(g, { keepPositions: true, ...opts })
+}
+
 /** One load at a time: a change of size or store while loading runs once the current load ends. */
 let loading: Promise<void> | null = null
 let again = false
@@ -65,21 +94,33 @@ async function loadOnce() {
   error.value = null
   highlightText.value = ''
   try {
-    const loaded = await client.dataset({ name: 'network', size: size.value, store: store.value })
+    const history = store.value === 'history'
+    const loaded = await client.dataset({ name: 'network', size: size.value, ...(history ? { history: true } : { store: store.value as 'memory' | 'csr' }) })
     nums.value.nodes = loaded.nodes
     nums.value.rels = loaded.relationships
     if (!loaded.reused) nums.value.loadMs = loaded.ms
+    latest.value = viewing.value = loaded.version ?? 0
     const ov = await client.overview(undefined, { groupKey: 'community' })
     nums.value.transferMs = ov.ms
-    indexOf = new Map(ov.ids.map((id, i) => [id, i]))
+    drawing.reset(ov, latest.value)
     if (view) {
       const t1 = performance.now()
-      view.setGraph({
-        nodes: ov.ids.map((id, i) => ({ id, label: ov.captions[i] || ov.labels[i], group: ov.labels[i] === 'City' ? 'City' : `Community ${ov.groups![i]}` })),
-        edges: ov.edgeTypes.map((t, i) => ({ source: ov.edges[2 * i]!, target: ov.edges[2 * i + 1]!, group: t })),
-      })
+      view.setGraph({ nodes: [], edges: [] })
+      drawNow()
       view.fit()
       nums.value.drawMs = performance.now() - t1
+    }
+    // The timeline: the network's growth, a commit per person.
+    if (history) {
+      const commits = (await client.commits()).map((c) => ({ version: c.version, time: c.time, author: c.author, message: c.message, size: c.size }))
+      if (!timeline && tlHost.value) timeline = createTimeline(tlHost.value, { commits, value: latest.value, theme: isDark.value ? 'dark' : 'light', onChange: (v) => {
+        viewing.value = v
+        scrubber.to(v)
+      } })
+      else {
+        timeline?.setCommits(commits)
+        timeline?.setValue(latest.value)
+      }
     }
   } catch (e) {
     error.value = (e as Error).message
@@ -94,7 +135,8 @@ async function run(q = query.value) {
   busy.value = true
   error.value = null
   try {
-    const r = await client.run(q)
+    // At a past version, queries read that version.
+    const r = await client.run(viewing.value < latest.value ? `AT VERSION ${viewing.value}\n${q}` : q)
     nums.value.queryMs = r.ms
     // The nodes in the result, highlighted in the whole drawing.
     const hit = new Set<number>()
@@ -142,7 +184,10 @@ watch(search, (s) => {
 })
 watch(mode, (m) => view?.setMode(m))
 watch(labels, (on) => view?.setLabels(on))
-watch(isDark, (d) => view?.setTheme(d ? 'dark' : 'light'))
+watch(isDark, (d) => {
+  view?.setTheme(d ? 'dark' : 'light')
+  timeline?.setTheme(d ? 'dark' : 'light')
+})
 watch([size, store], load)
 
 onMounted(async () => {
@@ -163,6 +208,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  timeline?.destroy()
   clearInterval(timer)
   view?.destroy()
   client?.close()
@@ -183,8 +229,9 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
       <label class="td-field">
         <span class="td-eyebrow">Store</span>
         <select v-model="store" :disabled="busy">
-          <option value="csr">CsrStore (read-only, compact)</option>
-          <option value="memory">MemoryStore</option>
+          <option value="history">With its history: MemoryStore and a timeline</option>
+          <option value="csr">CsrStore (read-only, compact), no history</option>
+          <option value="memory">MemoryStore, no history</option>
         </select>
       </label>
       <div class="td-seg" role="group" aria-label="View">
@@ -205,6 +252,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
       <div><b>{{ Math.round(nums.fps) }}</b><span>frames per second</span></div>
       <div><b>{{ nums.layout ? ms(nums.tickMs) + ' ms' : 'at rest' }}</b><span>{{ nums.layout ? 'GPU layout per tick' : 'layout' }}</span></div>
       <div><b>{{ ms(nums.queryMs) }} ms</b><span>last query</span></div>
+      <div v-if="store === 'history'"><b>{{ ms(scrubMs) }} ms</b><span>last timeline step (diff in the worker)</span></div>
     </div>
 
     <div class="td-main">
@@ -214,6 +262,13 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
         <div v-if="highlightText" class="td-highlight">{{ highlightText }}</div>
         <GraphControls v-if="!gpuError" :mode="mode" />
       </section>
+      <div v-show="store === 'history'" class="td-tl">
+        <p class="td-tl-note">
+          <span v-if="viewing < latest">Version {{ viewing.toLocaleString() }} of {{ latest.toLocaleString() }}: queries read this version.</span>
+          <span v-else>The network as it grew, a person at a time: drag the timeline, or press Play.</span>
+        </p>
+        <div ref="tlHost" />
+      </div>
       <aside class="td-side">
         <label class="td-field">
           <span class="td-eyebrow">Search the drawing (on the GPU's captions)</span>
@@ -256,7 +311,11 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .td-nums div { padding: 10px 12px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); }
 .td-nums b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .td-nums span { font-size: 12px; color: var(--vp-c-text-2); }
-.td-main { display: grid; grid-template-columns: 1fr 340px; gap: 12px; height: calc(100vh - var(--vp-nav-height) - 240px); min-height: 560px; }
+.td-main { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: 1fr auto; gap: 12px; height: calc(100vh - var(--vp-nav-height) - 240px); min-height: 560px; }
+.td-view { grid-column: 1; grid-row: 1; }
+.td-side { grid-column: 2; grid-row: 1 / span 2; }
+.td-tl { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 6px; }
+.td-tl-note { margin: 0; font-size: 13px; color: var(--vp-c-text-2); }
 .td-view { position: relative; border: 1px solid var(--vp-c-divider); border-radius: 10px; overflow: hidden; background: var(--vp-c-bg-alt); }
 .td-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .td-gpu { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--vp-c-text-2); }
@@ -271,7 +330,8 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .td-error { margin: 0; color: var(--vp-c-danger-1); font-size: 14px; }
 .td-note { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.5; }
 @media (max-width: 960px) {
-  .td-main { grid-template-columns: 1fr; height: auto; }
+  .td-main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+  .td-view, .td-side, .td-tl { grid-column: 1; grid-row: auto; }
   .td-view { height: 65vh; }
 }
 </style>

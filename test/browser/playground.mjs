@@ -105,6 +105,42 @@ try {
 
   }
 
+  // History: the ontology's timeline moves the drawing, and a past version can be queried.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(url);
+  await page.waitForFunction(() => document.querySelector('.pg-status')?.textContent?.includes('loaded'), null, { timeout: 60000 });
+  await page.selectOption('.pg-field select', 'ontology');
+  await page.waitForFunction(() => /26 versions/.test(document.querySelector('.pg-status')?.textContent ?? ''), null, { timeout: 60000 });
+  const slider = page.locator('.pg-timeline [role="slider"]');
+  check((await slider.getAttribute('aria-valuenow')) === '26', `the ontology's timeline is at its latest version (${await slider.getAttribute('aria-valuenow')})`);
+  const drawn = async () => Number(/^(\d+) nodes/.exec((await page.textContent('.pg-stats')) ?? '')?.[1] ?? -1);
+  const waitDrawn = (n) => page.waitForFunction((n) => (document.querySelector('.pg-stats')?.textContent ?? '').startsWith(`${n} nodes`), n, { timeout: 15000 }).then(() => true, () => false);
+  check(await waitDrawn(31), `the latest version is drawn (${await drawn()} nodes)`);
+  await slider.focus();
+  await page.keyboard.press('Home');
+  check(await waitDrawn(0), `Home goes to version 0, the empty graph (${await drawn()} nodes)`);
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
+  check(await waitDrawn(16), `eight steps on, version 8 is drawn (${await drawn()} nodes)`);
+  check(/version 8 of 26/i.test((await page.textContent('.pg-past')) ?? ''), 'the page says which version is shown');
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: join(shots, 'playground-timeline.png') });
+  await page.fill('.pg-editor textarea', 'MATCH (n) RETURN count(n) AS n');
+  await page.click('.pg-past button');
+  check((await page.inputValue('.pg-editor textarea')).startsWith('AT VERSION 8'), 'Query this version puts AT VERSION before the query');
+  await page.click('.pg-primary');
+  await page.waitForFunction(() => /row/.test(document.querySelector('.pg-status')?.textContent ?? ''), null, { timeout: 15000 });
+  check(((await page.textContent('.pg-table tbody')) ?? '').includes('16'), 'the query reads version 8');
+  await page.keyboard.press('End');
+  await slider.focus();
+  await page.keyboard.press('End');
+  check(await waitDrawn(31), 'End goes back to the latest version');
+  // A write adds a version to the timeline.
+  await page.fill('.pg-editor textarea', "CREATE (:Team {name: 'Reliability'})");
+  await page.click('.pg-primary');
+  await page.waitForFunction(() => document.querySelector('.pg-timeline [role="slider"]')?.getAttribute('aria-valuenow') === '27', null, { timeout: 15000 }).catch(() => {});
+  check((await slider.getAttribute('aria-valuenow')) === '27', 'a write adds version 27 and the timeline follows it');
+  check(await waitDrawn(32), 'the new node is drawn');
+
   // Runnable examples in the docs: Run shows a table and draws the graph.
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto(`${site}guide/sample-data`);
@@ -143,6 +179,20 @@ try {
     await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '25,008', null, { timeout: 120000 });
     check(true, 'the demo switches to 25,000 people (25,008 nodes)');
   }
+  // The demo's timeline: the network as it grew.
+  const demoSlider = page.locator('.td-tl [role="slider"]');
+  check((await demoSlider.getAttribute('aria-valuenow')) === '10001', `the demo's timeline has the network's growth (${await demoSlider.getAttribute('aria-valuenow')} versions)`);
+  await demoSlider.focus();
+  await page.keyboard.press('PageDown');
+  await page.keyboard.press('PageDown');
+  await page.waitForTimeout(2000);
+  const fewer = Number((await page.textContent('.td-nums b'))?.replace(/,/g, ''));
+  check(/Version \d[\d,]* of 10,001/.test((await page.textContent('.td-tl-note')) ?? ''), `stepping back shows an earlier version (${await page.textContent('.td-tl-note')})`);
+  await page.screenshot({ path: join(shots, 'demo-timeline.png') });
+  await demoSlider.focus();
+  await page.keyboard.press('End');
+  await page.waitForTimeout(1000);
+  void fewer;
   await page.click('.td-chip:has-text("Two hops from Bo 1")');
   await page.waitForSelector('.td-highlight', { timeout: 30000 });
   check(/\d+ nodes? highlighted/.test(await page.textContent('.td-highlight')), `a query highlights its result (${await page.textContent('.td-highlight')})`);

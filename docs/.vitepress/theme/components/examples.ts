@@ -1,5 +1,5 @@
 /** Example queries for each playground dataset. Every one runs in test/docs-examples.test.ts. */
-export type DatasetKey = 'social' | 'family' | 'metro' | 'network' | 'big'
+export type DatasetKey = 'social' | 'family' | 'metro' | 'ontology' | 'network' | 'big'
 
 export interface Example {
   readonly title: string
@@ -37,6 +37,15 @@ export const EXAMPLES: Record<DatasetKey, Example[]> = {
     { title: 'Fewest stops', query: "MATCH (:Line {name: 'Line 1'})<-[:ON]-(s)\nWITH collect(s) AS stops\nWITH stops[0] AS a, stops[-1] AS b\nMATCH p = shortestPath((a)-[:CONNECTS*]->(b))\nRETURN p" },
     { title: 'Transfer stations', query: 'MATCH (s:Station)-[:ON]->(l:Line)\nWITH s, count(l) AS lines\nWHERE lines > 1\nRETURN s.name AS station, lines\nORDER BY lines DESC' },
     { title: 'Line lengths', query: 'MATCH (l:Line)<-[:ON]-(s)\nRETURN l.name AS line, count(s) AS stations\nORDER BY line' },
+  ],
+  ontology: [
+    { title: 'The platform now', query: 'MATCH (a)-[r]->(b)\nRETURN a, r, b' },
+    { title: 'Who changed what', query: 'UNWIND commits() AS c\nRETURN c.version AS version, substring(c.at, 0, 10) AS day, c.author AS author, c.message AS message' },
+    { title: 'Two weeks in', query: 'AT VERSION 8\nMATCH (a)-[r]->(b)\nRETURN a, r, b' },
+    { title: 'ingest_orders in July', query: "AT TIME '2026-07-06T12:00:00Z'\nMATCH (f:Flow {name: 'ingest_orders'})-[r]-(x)\nRETURN f, r, x" },
+    { title: 'History of orders', query: "MATCH (d:Dataset {name: 'orders'})\nUNWIND history(d) AS h\nRETURN h.version AS version, h.author AS author, h.change AS change, h.key AS key, h.new AS value" },
+    { title: 'What feeds churn', query: "MATCH p = (:Dashboard {name: 'Churn risk'})-[:SHOWS]->()-[:READS|WRITES*1..8]-(:Dataset)\nRETURN p" },
+    { title: 'Add a flow', query: "MATCH (s:Dataset {name: 'sessions'}), (t:Team {name: 'Growth'})\nCREATE (f:Flow {name: 'session_alerts', schedule: 'hourly', status: 'active'})-[:READS]->(s), (t)-[:OWNS]->(f)\nRETURN f, s, t" },
   ],
   network: networkExamples,
   big: networkExamples,

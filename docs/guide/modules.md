@@ -28,6 +28,7 @@ piece and what's beneath it, nothing more.
 | `@smaltworks/smaltcy/history` | Keep every version of a graph: `HistoryStore`, past versions, diffs ([time travel](./time-travel)) | the stores |
 | `@smaltworks/smaltcy/functions` | Add functions every language sees; compare values as Cypher does | nothing |
 | `@smaltworks/smaltcy/render` | Draw any graph with WebGPU, in 2D or 3D | nothing |
+| `@smaltworks/smaltcy/timeline` | A timeline to move through a graph's versions ([time travel](./time-travel)) | nothing |
 | `@smaltworks/smaltcy/client` | Query a graph that runs in a Web Worker | nothing (about 3 KB) |
 | `@smaltworks/smaltcy/worker` | The worker script: the engine and Cypher, off the page's thread | |
 | `@smaltworks/smaltcy/worker-runtime` | `createHandler`, for a worker of your own | the engine, Cypher, the sample data |

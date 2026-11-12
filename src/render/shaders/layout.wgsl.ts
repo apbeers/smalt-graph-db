@@ -10,7 +10,8 @@
  * - damped velocity integration: v = (v + F·alpha)·(1 − decay), p += v.
  *
  * Positions are double-buffered (posIn → posOut; the host copies back). Pinned nodes keep their
- * position. With dims = 2 the z component stays 0.
+ * position; every node's force is scaled by its mobility (1 but after a small change, see place.ts).
+ * With dims = 2 the z component stays 0.
  */
 export const LAYOUT_WGSL = /* wgsl */ `
 struct Params {
@@ -43,6 +44,7 @@ struct Params {
 @group(0) @binding(4) var<storage, read> pinned: array<u32>;
 @group(0) @binding(5) var<storage, read> offsets: array<u32>;
 @group(0) @binding(6) var<storage, read> nbrs: array<u32>;
+@group(0) @binding(7) var<storage, read> mobility: array<f32>;
 
 const TILE: u32 = 256u;
 var<workgroup> tile: array<vec4f, 256>;
@@ -133,6 +135,8 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
 
   // Gravity.
   f = f - pi * (P.gravity * a);
+  // After a small change, nodes far from it take only part of the force, so the drawing holds still.
+  f = f * mobility[i];
 
   var v = (vel[i].xyz + f) * (1.0 - P.decay);
   let speed = length(v);

@@ -19,6 +19,7 @@ const entries = {
   client: 'src/client/index.ts',
   'worker-runtime': 'src/worker/runtime.ts',
   render: 'src/render/index.ts',
+  timeline: 'src/timeline/index.ts',
   datasets: 'src/datasets/index.ts',
   'smaltcy-worker': 'src/worker/worker.ts',
 };

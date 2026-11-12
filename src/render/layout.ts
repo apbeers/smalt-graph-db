@@ -52,6 +52,11 @@ export class GpuLayout {
   private readonly pinned: GrowableBuffer;
   private readonly offsets: GrowableBuffer;
   private readonly nbrs: GrowableBuffer;
+  private readonly mobility: GrowableBuffer;
+  private mobilityData = new Float32Array(64);
+  /** Whether some node's mobility is below 1 (or the buffer holds no mobility yet). */
+  private dampedNow = true;
+  private mobilityStale = true;
   private readonly params: GPUBuffer;
   private readonly paramData = new ArrayBuffer(80);
   private readonly paramU32 = new Uint32Array(this.paramData);
@@ -89,6 +94,7 @@ export class GpuLayout {
     this.pinned = new GrowableBuffer(device, 'layout.pinned', S, 4);
     this.offsets = new GrowableBuffer(device, 'layout.offsets', S, 4);
     this.nbrs = new GrowableBuffer(device, 'layout.nbrs', S, 4);
+    this.mobility = new GrowableBuffer(device, 'layout.mobility', S, 4);
     this.params = device.createBuffer({ label: 'layout.params', size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module = device.createShaderModule({ label: 'layout', code: LAYOUT_WGSL });
     this.pipeline = device.createComputePipeline({ label: 'layout.tick', layout: 'auto', compute: { module, entryPoint: 'tick' } });
@@ -174,6 +180,28 @@ export class GpuLayout {
     this.pinned.ensure(n);
     this.offsets.ensure(n + 1);
     this.nbrs.ensure(csr.neighbors.length);
+    if (this.mobility.ensure(n)) this.mobilityStale = true;
+  }
+
+  /** Whether some nodes take only part of the force (after `setMobility` with values). */
+  get damped(): boolean {
+    return this.dampedNow;
+  }
+
+  /** Whether the mobility buffer was reallocated and needs `setMobility` before the next tick. */
+  get stale(): boolean {
+    return this.mobilityStale;
+  }
+
+  /** How much of the force each node takes (0..1 per node); null sets every node to 1. */
+  setMobility(m: Float32Array | null): void {
+    if (!m && !this.dampedNow && !this.mobilityStale) return;
+    if (this.mobilityData.length < this.mobility.capacity) this.mobilityData = new Float32Array(this.mobility.capacity);
+    if (m) this.mobilityData.set(m.subarray(0, Math.min(m.length, this.n)));
+    else this.mobilityData.fill(1);
+    this.mobility.write(this.mobilityData, m ? Math.min(m.length, this.n) : this.mobility.capacity);
+    this.dampedNow = !!m;
+    this.mobilityStale = false;
   }
 
   private resetState(csr: Csr): void {
@@ -213,7 +241,7 @@ export class GpuLayout {
   /** Encode and submit one tick at the current alpha, then cool. */
   tick(): void {
     if (this.n === 0) return;
-    const key = `${this.pos.version}.${this.next.version}.${this.vel.version}.${this.pinned.version}.${this.offsets.version}.${this.nbrs.version}`;
+    const key = `${this.pos.version}.${this.next.version}.${this.vel.version}.${this.pinned.version}.${this.offsets.version}.${this.nbrs.version}.${this.mobility.version}`;
     if (!this.bindGroup || key !== this.bindKey) {
       this.bindKey = key;
       this.bindGroup = this.device.createBindGroup({
@@ -226,6 +254,7 @@ export class GpuLayout {
           { binding: 4, resource: { buffer: this.pinned.buffer } },
           { binding: 5, resource: { buffer: this.offsets.buffer } },
           { binding: 6, resource: { buffer: this.nbrs.buffer } },
+          { binding: 7, resource: { buffer: this.mobility.buffer } },
         ],
       });
     }
@@ -310,7 +339,7 @@ export class GpuLayout {
   }
 
   destroy(): void {
-    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs, this.gatherSrc, this.gatherOff]) b.destroy();
+    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs, this.mobility, this.gatherSrc, this.gatherOff]) b.destroy();
     this.params.destroy();
     this.gatherParams.destroy();
     for (const b of this.staging) b.destroy();

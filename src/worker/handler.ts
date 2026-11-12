@@ -49,17 +49,19 @@ export function overview(store: GraphStore, limit = Infinity, keys: readonly str
   });
   const edges: number[] = [];
   const edgeTypes: string[] = [];
+  const relIds: number[] = [];
   store.scanRels(null, (r) => {
     const a = index.get(store.relStart(r));
     const b = index.get(store.relEnd(r));
     if (a !== undefined && b !== undefined) {
       edges.push(a, b);
       edgeTypes.push(store.relType(r));
+      relIds.push(r);
     }
   });
   let total = 0;
   store.scanNodes(null, () => void total++);
-  return { ids, labels, captions, ...(groups ? { groups } : {}), edges, edgeTypes, truncated: total > ids.length, ms: performance.now() - t0 };
+  return { ids, labels, captions, ...(groups ? { groups } : {}), edges, edgeTypes, relIds, truncated: total > ids.length, ms: performance.now() - t0 };
 }
 
 export function createHandler(graph: Graph = open()): { handle(req: Request): Response; graph: Graph } {

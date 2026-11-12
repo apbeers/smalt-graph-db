@@ -20,7 +20,7 @@ import { GpuLayout, decayForTicks } from './layout.js';
 import { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT, GroupColors, THEMES, packRgba8, parseColor } from './palette.js';
 import type { Rgba } from './palette.js';
 import { PICK_FORMAT, Picker } from './picking.js';
-import { NONE, hash01, placeNodes, seedPosition } from './place.js';
+import { NONE, hash01, mobilityAround, placeNodes, seedPosition } from './place.js';
 import type { PickRequest } from './picking.js';
 import { matchNodes } from './search.js';
 import { DRAW_WGSL } from './shaders/draw.wgsl.js';
@@ -115,6 +115,8 @@ export class GraphViewImpl implements GraphView {
   private animNow = 0;
   private ghostN = 0;
   private ghostE = 0;
+  /** Per-node layout mobility while the layout settles a small change (null: all 1). */
+  private mob: Float32Array | null = null;
   private edgeData = new Uint32Array(64 * 4);
   private edgeF32 = new Float32Array(this.edgeData.buffer);
 
@@ -271,6 +273,7 @@ export class GraphViewImpl implements GraphView {
         return self.n > 0 && (self.switching || (self.layoutActive && self.lay.running));
       },
       reheat() {
+        self.freeLayout();
         self.lay.alpha = 1;
         self.layoutActive = true;
         self.requestFrame();
@@ -360,11 +363,47 @@ export class GraphViewImpl implements GraphView {
     else this.lay.setGraph(n, out.pos, this.csr, count);
 
     if (keep) {
-      // Reheat by how much changed, so that a step of one or two nodes barely moves the rest.
+      // Reheat by how much changed, and after a small change let mainly the nodes near it move, so
+      // that a step of one or two nodes barely moves the rest of the drawing.
       const changes = diff.added + diff.removed + 0.5 * (diff.edgesAdded + diff.edgesRemoved);
-      if (changes > 0) this.lay.alpha = Math.max(this.lay.alpha, Math.min(1, 0.02 + changes / Math.max(n, 1)));
+      const running = this.layoutActive && this.lay.running;
+      if (changes > 0) {
+        // A layout already running freely stays free; a damped one (an earlier small change, or a
+        // scrub) adds the nodes near this change to the ones that move.
+        const free = running && !this.lay.damped;
+        this.lay.alpha = Math.max(this.lay.alpha, Math.min(1, 0.05 + changes / Math.max(n, 1)));
+        if (free || changes > n * 0.2) {
+          this.mob = null;
+          this.lay.setMobility(null);
+        } else {
+          const mob = mobilityAround(n, this.csr, diff.touched);
+          const old = running ? this.mob : null;
+          if (old) {
+            for (let i = 0; i < n; i++) {
+              const s = diff.src[i]!;
+              mob[i] = Math.max(mob[i]!, s < old.length ? old[s]! : 1);
+            }
+          }
+          this.mob = mob;
+          this.lay.setMobility(mob);
+        }
+      } else if (this.lay.stale || (this.mob && this.mob.length !== n)) {
+        this.mob = null;
+        this.lay.setMobility(null);
+      } else if (this.mob) {
+        // Same nodes, perhaps in another order: carry each node's mobility over.
+        const mob = new Float32Array(n), old = this.mob;
+        for (let i = 0; i < n; i++) {
+          const s = diff.src[i]!;
+          mob[i] = s < old.length ? old[s]! : 1;
+        }
+        this.mob = mob;
+        this.lay.setMobility(mob);
+      }
       this.layoutActive = n > 0 && (this.layoutActive || changes > 0);
     } else {
+      this.mob = null;
+      this.lay.setMobility(null);
       this.lay.alpha = 1;
       this.layoutActive = n > 0;
     }
@@ -424,6 +463,7 @@ export class GraphViewImpl implements GraphView {
     if (mode === this.mode || this.destroyed) return;
     this.mode = mode;
     this.lay.dims = mode === '2d' ? 2 : 3;
+    this.freeLayout();
     this.anim = null;
     this.cam = convertCamera(this.cam, mode, Math.max(this.height, 1));
     if (mode === '3d') this.animateTo({ ...this.cam, yaw: 0.55, pitch: -0.3 }, 700);
@@ -674,6 +714,7 @@ export class GraphViewImpl implements GraphView {
     this.anim = null;
     this.autoFit = false;
     this.lay.setPinned(node, true);
+    this.freeLayout();
     this.lay.alphaTarget = 0.3;
     this.layoutActive = true;
     this.setHover({ kind: 'node', index: node });
@@ -704,6 +745,12 @@ export class GraphViewImpl implements GraphView {
   }
 
   // ---- internals ------------------------------------------------------------------------------
+
+  /** Every node takes the full layout force again. */
+  private freeLayout(): void {
+    this.mob = null;
+    this.lay.setMobility(null);
+  }
 
   private validHit(hit: Hit | null): Hit | null {
     if (!hit) return null;
