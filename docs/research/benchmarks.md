@@ -30,3 +30,25 @@ Loading the graph took 229 ms and building the `CsrStore` from it 155 ms.
 - `MemoryStore` seeks without an index here: it scans the label. `CsrStore` indexes every property the first time a
   query looks it up.
 - `CsrStore` reads relationships from contiguous typed arrays, which shows from two hops on.
+
+## History (2026-11-12)
+
+The same run continues with `network(10000, 42, { history: true })` loaded into a graph that keeps history: 10,001
+versions, one per person joining, with a snapshot every 2,000 changes. Milliseconds, median of 7 runs.
+
+| Step | Time |
+| --- | ---: |
+| Generate and load all 10,001 versions | 439 |
+| Open a recent version (about 10,000 nodes) | 64 |
+| Open a version mid-way (about 5,000 nodes) | 32 |
+| Diff across 1 commit | 0.02 |
+| Diff across 100 commits | 0.41 |
+| Diff across all of history, forwards | 103 |
+| Diff across all of history, backwards | 47 |
+| `commits()` | 1.7 |
+| `AT VERSION` mid-way, counting people (version already open) | 2.0 |
+
+- **Opening a version** costs about as much as copying a graph of its size, plus replaying at most 2,000 changes.
+  Opened versions are kept, so the next query on the same version is quick.
+- **Scrubbing a timeline** moves a step or a few at a time. Each step is a diff of microseconds, and the drawing
+  applies it without reloading.

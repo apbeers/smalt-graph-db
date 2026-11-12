@@ -207,8 +207,11 @@ class Reader implements HistoryReader {
     const present = this.present();
     const forward = log.commits.slice(cp.version - log.first, version - log.first).reduce((n, c) => n + c.changes.length, 0);
     const backward = log.commits.slice(version - log.first, log.last - log.first).reduce((n, c) => n + c.changes.length, 0);
+    // Going back from the present first copies the whole live graph, so it only pays when that and the changes to
+    // undo cost less than replaying from the snapshot (which is already a copy).
+    const st = present.stats();
     let mem: MemoryStore;
-    if (backward < forward) {
+    if (backward + st.nodes + st.rels < forward) {
       mem = restore(snapshotOf(present, log.last), present.indexes());
       for (let v = log.last; v > version; v--) {
         const ch = log.get(v)!.changes;

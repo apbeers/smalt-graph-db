@@ -60,3 +60,50 @@ mkdirSync('bench/results', { recursive: true });
 const file = `bench/results/${new Date().toISOString().slice(0, 10)}.local.json`;
 writeFileSync(file, JSON.stringify({ date: new Date().toISOString(), node: process.version, people: PEOPLE, nodes: st.nodes, rels: st.rels, runs: RUNS, loadMs, csrMs, results }, null, 2));
 console.log(`\nwrote ${file}`);
+
+// History: the network loaded with its growth, a commit per person.
+{
+  const HP = Number(process.env.BENCH_HISTORY_PEOPLE ?? 10000);
+  const t0 = performance.now();
+  const data = network(HP, 42, { history: true });
+  const h = open({ history: true });
+  h.load(data);
+  const loadMs = performance.now() - t0;
+  const last = h.version!;
+  const med = (fn: () => void) => {
+    fn();
+    const ts: number[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const s = performance.now();
+      fn();
+      ts.push(performance.now() - s);
+    }
+    ts.sort((a, b) => a - b);
+    return ts[Math.floor(ts.length / 2)]!;
+  };
+  const store = h.store as unknown as { history: { at(v: number): unknown } };
+  // Opening a version: a fresh one each run (opened versions are cached).
+  let v = 1;
+  const openMs = (target: (i: number) => number) => {
+    const ts: number[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const s = performance.now();
+      store.history.at(target(v++));
+      ts.push(performance.now() - s);
+    }
+    ts.sort((a, b) => a - b);
+    return ts[Math.floor(ts.length / 2)]!;
+  };
+  const rows: [string, number][] = [
+    ['open a recent version', openMs((i) => last - 3 - i)],
+    ['open a version mid-way', openMs((i) => Math.floor(last / 2) - i)],
+    ['diff: 1 commit', med(() => h.diff(last - 1, last))],
+    ['diff: 100 commits', med(() => h.diff(last - 100, last))],
+    ['diff: all, forwards', med(() => h.diff(0, last))],
+    ['diff: all, backwards', med(() => h.diff(last, 0))],
+    ['commits()', med(() => h.commits())],
+    ['AT VERSION mid, count people', med(() => h.run(`AT VERSION ${Math.floor(last / 2)} MATCH (p:Person) RETURN count(p)`))],
+  ];
+  console.log(`\nhistory: network(${HP}) as it grew, ${last.toLocaleString()} versions; generate + load ${loadMs.toFixed(0)} ms`);
+  for (const [name, ms] of rows) console.log(name.padEnd(32), ms.toFixed(2).padStart(10));
+}
