@@ -3,13 +3,14 @@
  * (docs/adr/0001-smaltcy.md, "Persistence").
  */
 import { SmaltcyError } from '../errors.js';
-import type { GraphStore } from '../store/interface.js';
+import type { GraphStore, HistoryJSON } from '../store/interface.js';
 import type { PropertyValue } from '../values.js';
 
 export interface GraphJSON {
   /** `smaltcy-graph`, so a file can be recognised. */
   readonly format?: 'smaltcy-graph';
-  readonly version?: 1;
+  /** 1, or 2 with `history`. */
+  readonly version?: 1 | 2;
   readonly nodes: readonly {
     /** Any id, used only to connect relationships in this file. */
     readonly id: string | number;
@@ -23,6 +24,11 @@ export interface GraphJSON {
     readonly properties?: Readonly<Record<string, PropertyValue>>;
   }[];
   readonly indexes?: readonly { readonly label: string; readonly key: string }[];
+  /**
+   * Version 2: the graph's history, every version (a graph opened with history keeps it). `nodes` and
+   * `relationships` are the latest version, so a reader that ignores history still gets the graph.
+   */
+  readonly history?: HistoryJSON;
 }
 
 /** Adds a graph to a store. Returns the store's ids for the file's node ids. */

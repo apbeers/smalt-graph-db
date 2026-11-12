@@ -16,12 +16,13 @@ const LAYERS: Record<string, { runtime: string[]; types?: string[] }> = {
   plan: { runtime: ['functions', 'values', 'errors'] },
   store: { runtime: ['values', 'errors'], types: ['plan'] },
   engine: { runtime: ['plan', 'functions', 'store', 'values', 'errors'] },
+  history: { runtime: ['store', 'values', 'errors'], types: ['plan'] },
   cypher: { runtime: ['plan', 'functions', 'values', 'errors'] },
   render: { runtime: [] },
   datasets: { runtime: [], types: ['engine'] },
   worker: { runtime: ['index', 'datasets', 'store', 'engine', 'errors', 'values'], types: ['plan'] },
   client: { runtime: ['worker', 'errors', 'values'] },
-  index: { runtime: ['cypher', 'engine', 'store', 'plan', 'worker', 'errors', 'values'] },
+  index: { runtime: ['cypher', 'engine', 'store', 'history', 'plan', 'worker', 'errors', 'values'] },
 };
 
 function files(dir: string): string[] {
@@ -60,13 +61,14 @@ const ENTRIES: Record<string, { file: string; allow: string[] }> = {
   '@smaltworks/smaltcy/functions': { file: 'src/functions/index.ts', allow: ['functions', 'values', 'errors'] },
   '@smaltworks/smaltcy/plan': { file: 'src/plan/index.ts', allow: ['plan', 'functions', 'values', 'errors'] },
   '@smaltworks/smaltcy/store': { file: 'src/store/index.ts', allow: ['store', 'values', 'errors'] },
+  '@smaltworks/smaltcy/history': { file: 'src/history/index.ts', allow: ['history', 'store', 'values', 'errors'] },
   '@smaltworks/smaltcy/engine': { file: 'src/engine/index.ts', allow: ['engine', 'plan', 'functions', 'store', 'values', 'errors'] },
   '@smaltworks/smaltcy/cypher': { file: 'src/cypher/index.ts', allow: ['cypher', 'plan', 'functions', 'values', 'errors'] },
   '@smaltworks/smaltcy/render': { file: 'src/render/index.ts', allow: ['render'] },
   '@smaltworks/smaltcy/client': { file: 'src/client/index.ts', allow: ['client', 'worker', 'errors', 'values'] },
   '@smaltworks/smaltcy/datasets': { file: 'src/datasets/index.ts', allow: ['datasets'] },
-  '@smaltworks/smaltcy/worker-runtime': { file: 'src/worker/runtime.ts', allow: ['worker', 'index', 'cypher', 'engine', 'plan', 'functions', 'store', 'datasets', 'values', 'errors'] },
-  '@smaltworks/smaltcy': { file: 'src/index.ts', allow: ['index', 'cypher', 'engine', 'plan', 'functions', 'store', 'worker', 'values', 'errors'] },
+  '@smaltworks/smaltcy/worker-runtime': { file: 'src/worker/runtime.ts', allow: ['worker', 'index', 'cypher', 'engine', 'plan', 'functions', 'store', 'history', 'datasets', 'values', 'errors'] },
+  '@smaltworks/smaltcy': { file: 'src/index.ts', allow: ['index', 'cypher', 'engine', 'plan', 'functions', 'store', 'history', 'worker', 'values', 'errors'] },
 };
 
 describe('each entry point bundles only its layers', () => {

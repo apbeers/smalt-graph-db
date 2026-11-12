@@ -20,6 +20,7 @@
       "@smaltworks/smaltcy/datasets": ["./src/datasets/index.ts"],
       "@smaltworks/smaltcy/functions": ["./src/functions/index.ts"],
       "@smaltworks/smaltcy/store": ["./src/store/index.ts"],
+      "@smaltworks/smaltcy/history": ["./src/history/index.ts"],
       "@smaltworks/smaltcy/client": ["./src/client/index.ts"],
       "@smaltworks/smaltcy/worker-runtime": ["./src/worker/runtime.ts"]
     }

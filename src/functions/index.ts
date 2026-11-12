@@ -15,5 +15,8 @@ export {
   type AggregateDef,
   type FnContext,
   type GraphReader,
+  type HistoryLike,
+  type CommitLike,
+  commitMap,
 } from './library.js';
 export { equals, compare, orderCompare, groupKey, rowKey } from './compare.js';

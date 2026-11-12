@@ -45,7 +45,20 @@ const COMPARE: Record<string, string> = { '=': 'eq', '<>': 'neq', '<': 'lt', '<=
 
 export function bind(st: Statement): GraphPlan {
   if (st.t !== 'query') return { kind: st.t, planVersion: PLAN_VERSION, label: st.label, key: st.key };
-  return new Binder().query(st.parts, st.unionAll);
+  const plan = new Binder().query(st.parts, st.unionAll);
+  if (!st.asOf || plan.kind !== 'query') return plan;
+  const x = 'version' in st.asOf ? st.asOf.version : st.asOf.time;
+  if (x.t !== 'lit' && x.t !== 'param') semantic(`AT ${'version' in st.asOf ? 'VERSION' : 'TIME'} takes a value or a parameter, not an expression`);
+  const e: PExpr = x.t === 'lit' ? { k: 'lit', v: x.v } : { k: 'param', name: (x as Extract<typeof x, { t: 'param' }>).name };
+  if (writesTo(plan.root)) semantic("AT VERSION and AT TIME read the past: a query that writes can't use them");
+  return { ...plan, asOf: 'version' in st.asOf ? { version: e } : { time: e } };
+}
+
+function writesTo(op: Op): boolean {
+  if (op.op === 'create' || op.op === 'merge' || op.op === 'set' || op.op === 'remove' || op.op === 'delete') return true;
+  if (op.op === 'argument') return false;
+  if (op.op === 'union') return op.inputs.some(writesTo);
+  return writesTo(op.input);
 }
 
 class Binder {

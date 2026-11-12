@@ -20,6 +20,63 @@ export interface GraphReader {
   relEnd(rel: number): number;
   relProperties(rel: number): Readonly<Record<string, unknown>>;
   degree(node: number, dir: 'out' | 'in' | 'both', types: readonly string[] | null): number;
+  /** Present when the store keeps its history: what the temporal functions read. */
+  readonly history?: HistoryLike;
+}
+
+/** A commit as the temporal functions see it (a store's `CommitInfo` has this shape). */
+export interface CommitLike {
+  readonly version: number;
+  readonly time: number;
+  readonly author?: string;
+  readonly message?: string;
+  readonly size: number;
+  readonly counts: { readonly [K in 'nodesCreated' | 'nodesDeleted' | 'relationshipsCreated' | 'relationshipsDeleted' | 'propertiesSet' | 'labelsChanged']: number };
+  readonly nodes: number;
+  readonly relationships: number;
+}
+
+/** The part of a store's history the temporal functions read (a store's `HistoryReader` has this shape). */
+export interface HistoryLike {
+  readonly version: number;
+  commits(from?: number, to?: number): readonly CommitLike[];
+  commit(version: number): CommitLike | undefined;
+  changesOf(kind: 'node' | 'relationship', id: number): readonly { readonly commit: CommitLike; readonly change: { readonly k: string; readonly key?: string; readonly old?: unknown; readonly new?: unknown; readonly label?: string } }[];
+}
+
+/** A commit as a Cypher map. Times are milliseconds since 1970 (`time`) and ISO 8601 text (`at`). */
+export function commitMap(c: CommitLike): Value {
+  return {
+    version: c.version,
+    time: c.time,
+    at: new Date(c.time).toISOString(),
+    author: c.author ?? null,
+    message: c.message ?? null,
+    changes: c.size,
+    nodes: c.nodes,
+    relationships: c.relationships,
+    ...c.counts,
+  };
+}
+
+const CHANGE_WORDS: Record<string, string> = {
+  nodeCreated: 'created', relCreated: 'created', nodeDeleted: 'deleted', relDeleted: 'deleted',
+  nodeProp: 'set', relProp: 'set', labelAdded: 'label added', labelRemoved: 'label removed',
+};
+
+function historyOf(v: Value, ctx: FnContext): Value {
+  const h = ctx.store.history;
+  if (!h) return null;
+  if (!(v instanceof NodeRef) && !(v instanceof RelRef)) return typeError('history', v);
+  const kind = v instanceof NodeRef ? 'node' : 'relationship';
+  return h.changesOf(kind, v.id).map(({ commit, change }) => ({
+    ...(commitMap(commit) as Record<string, Value>),
+    change: CHANGE_WORDS[change.k] ?? change.k,
+    key: change.key ?? null,
+    old: (change.old ?? null) as Value,
+    new: (change.new ?? null) as Value,
+    label: change.label ?? null,
+  }));
 }
 
 export interface FnContext {
@@ -292,6 +349,23 @@ export const scalarFunctions = new Map<string, ScalarDef>(
         return true;
       },
     },
+
+    // History: what the graph's versions hold (null when the store keeps no history).
+    /** The version the query reads: the latest, or the one `AT VERSION` / `AT TIME` names. */
+    version: { arity: [0, 0], fn: (_args, ctx) => ctx.store.history?.version ?? null, deterministic: false },
+    /** Every commit up to the version read, oldest first, as maps. */
+    commits: { arity: [0, 0], fn: (_args, ctx) => ctx.store.history?.commits().map(commitMap) ?? null, deterministic: false },
+    /** One commit, as a map; null when there's no such version. */
+    commit: {
+      arity: [1, 1],
+      fn: nullIn(([v], ctx) => {
+        const c = ctx.store.history?.commit(num('commit', v!));
+        return c ? commitMap(c) : null;
+      }),
+      deterministic: false,
+    },
+    /** Every change to a node or relationship up to the version read: one map per change, with its commit. */
+    history: { arity: [1, 1], fn: nullIn(([v], ctx) => historyOf(v!, ctx)), deterministic: false },
 
     // Lists.
     size: { arity: [1, 1], fn: ([v]) => size(v!) },

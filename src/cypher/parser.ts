@@ -229,7 +229,17 @@ class Parser {
     let st: Statement;
     if (this.isKw('CREATE') && this.isKw('INDEX', this.peek())) st = this.createIndex(explain);
     else if (this.isKw('DROP')) st = this.dropIndex(explain);
-    else st = this.query(explain);
+    else {
+      // AT VERSION n / AT TIME t: the query reads the graph as it was.
+      let asOf: { version: Expr } | { time: Expr } | undefined;
+      if (this.isKw('AT') && (this.isKw('VERSION', this.peek()) || this.isKw('TIME', this.peek()))) {
+        this.next();
+        const which = this.next().v.toUpperCase();
+        const x = this.unary();
+        asOf = which === 'VERSION' ? { version: x } : { time: x };
+      }
+      st = { ...(this.query(explain) as Extract<Statement, { t: 'query' }>), ...(asOf ? { asOf } : {}) };
+    }
     this.eat(';');
     if (this.t.k !== 'eof') this.fail(`Unexpected '${this.t.v}'`);
     return st;

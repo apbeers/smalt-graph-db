@@ -30,9 +30,14 @@ export function social(): Graph {
 /** The same graph in each store, for read-only tests. */
 export function socialStores(): [string, Graph][] {
   const mem = social();
+  // A past version: the graph at version 1 of a history in which everything was deleted afterwards.
+  const hist = open({ history: true });
+  hist.run(SOCIAL);
+  hist.run('MATCH (n) DETACH DELETE n');
   return [
     ['memory', mem],
     ['csr', open({ store: CsrStore.from(mem.store) })],
+    ['past version', hist.at(1)],
   ];
 }
 

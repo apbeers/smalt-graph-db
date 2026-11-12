@@ -91,5 +91,12 @@ export type Clause = Span &
   );
 
 export type Statement =
-  | { readonly t: 'query'; readonly parts: readonly (readonly Clause[])[]; readonly unionAll: readonly boolean[]; readonly explain: boolean }
+  | {
+      readonly t: 'query';
+      readonly parts: readonly (readonly Clause[])[];
+      readonly unionAll: readonly boolean[];
+      readonly explain: boolean;
+      /** `AT VERSION n` or `AT TIME t` before the query: read the graph as it was (smaltcy's extension). */
+      readonly asOf?: { readonly version: Expr } | { readonly time: Expr };
+    }
   | { readonly t: 'createIndex' | 'dropIndex'; readonly label: string; readonly key: string; readonly explain: boolean };

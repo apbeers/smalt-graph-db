@@ -15,6 +15,7 @@ const entries = {
   cypher: 'src/cypher/index.ts',
   functions: 'src/functions/index.ts',
   store: 'src/store/index.ts',
+  history: 'src/history/index.ts',
   client: 'src/client/index.ts',
   'worker-runtime': 'src/worker/runtime.ts',
   render: 'src/render/index.ts',

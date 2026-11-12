@@ -138,6 +138,11 @@ export interface QueryPlan {
   readonly slotNames?: readonly string[];
   readonly root: Op;
   readonly columns: readonly Column[];
+  /**
+   * Read the graph as it was: at a version (an integer) or a moment (`time`: milliseconds since 1970, or an ISO 8601
+   * string). Literals or parameters only. The store must keep its history; a plan that reads the past can't write.
+   */
+  readonly asOf?: { readonly version: Expr } | { readonly time: Expr };
 }
 
 /** A property index, used by `match` to find nodes with a label and a property value. */

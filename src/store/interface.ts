@@ -71,8 +71,9 @@ export interface GraphStore {
   dropIndex?(label: string, key: string): void;
 
   // Writes: present when `capabilities.writes`.
-  createNode?(labels: readonly string[], props: Readonly<Record<string, PropertyValue>>): number;
-  createRel?(type: string, start: number, end: number, props: Readonly<Record<string, PropertyValue>>): number;
+  /** `id`: create it with this id (it must be free), as a replayed history does. Otherwise the store picks one. */
+  createNode?(labels: readonly string[], props: Readonly<Record<string, PropertyValue>>, id?: number): number;
+  createRel?(type: string, start: number, end: number, props: Readonly<Record<string, PropertyValue>>, id?: number): number;
   /** `undefined` or `null` removes the property. */
   setNodeProperty?(node: number, key: string, value: PropertyValue | undefined): void;
   setRelProperty?(rel: number, key: string, value: PropertyValue | undefined): void;
@@ -82,10 +83,121 @@ export interface GraphStore {
   deleteNode?(node: number): void;
   deleteRel?(rel: number): void;
 
+  /** Present when the store keeps its history (src/history): its versions, and the graph at any of them. */
+  readonly history?: HistoryReader;
+
   // Transactions: present when `capabilities.writes`. Not nested.
   begin?(): void;
   commit?(): void;
   rollback?(): void;
+}
+
+// History: the types a store with history offers (src/history implements them). Here so the engine and functions can
+// read history through any store without depending on the history module.
+
+/** One change in a commit. Each holds what's needed to apply it either way (old and new values, deleted data). */
+export type Change =
+  | { readonly k: 'nodeCreated' | 'nodeDeleted'; readonly id: number; readonly labels: readonly string[]; readonly props: Readonly<Record<string, PropertyValue>> }
+  | {
+      readonly k: 'relCreated' | 'relDeleted';
+      readonly id: number;
+      readonly type: string;
+      readonly start: number;
+      readonly end: number;
+      readonly props: Readonly<Record<string, PropertyValue>>;
+    }
+  /** `old` / `new` undefined: the property wasn't there / was removed. */
+  | { readonly k: 'nodeProp' | 'relProp'; readonly id: number; readonly key: string; readonly old?: PropertyValue; readonly new?: PropertyValue }
+  | { readonly k: 'labelAdded' | 'labelRemoved'; readonly id: number; readonly label: string };
+
+/** What a commit did, counted. */
+export interface ChangeCounts {
+  readonly nodesCreated: number;
+  readonly nodesDeleted: number;
+  readonly relationshipsCreated: number;
+  readonly relationshipsDeleted: number;
+  readonly propertiesSet: number;
+  readonly labelsChanged: number;
+}
+
+/** A version: one committed write. Version 0 is the empty graph before the first commit. */
+export interface CommitInfo {
+  readonly version: number;
+  /** Milliseconds since 1970. */
+  readonly time: number;
+  readonly author?: string;
+  readonly message?: string;
+  /** The number of changes. */
+  readonly size: number;
+  readonly counts: ChangeCounts;
+  /** The graph's size after the commit. */
+  readonly nodes: number;
+  readonly relationships: number;
+}
+
+export interface Commit extends CommitInfo {
+  readonly changes: readonly Change[];
+}
+
+/** One change to one node or relationship, with its commit: what `history(x)` returns. */
+export interface EntityChange {
+  readonly commit: CommitInfo;
+  readonly change: Change;
+}
+
+/** The net difference between two versions, for redrawing: what to add, remove and update. */
+export interface GraphDiff {
+  readonly from: number;
+  readonly to: number;
+  readonly nodesAdded: readonly { readonly id: number; readonly labels: readonly string[]; readonly props: Readonly<Record<string, PropertyValue>> }[];
+  readonly nodesRemoved: readonly number[];
+  /** Nodes there at both versions whose labels or properties differ: what changed (`null`: the property went). */
+  readonly nodesChanged: readonly {
+    readonly id: number;
+    readonly set: Readonly<Record<string, PropertyValue>>;
+    readonly labelsAdded: readonly string[];
+    readonly labelsRemoved: readonly string[];
+  }[];
+  readonly relsAdded: readonly { readonly id: number; readonly type: string; readonly start: number; readonly end: number; readonly props: Readonly<Record<string, PropertyValue>> }[];
+  readonly relsRemoved: readonly number[];
+  readonly relsChanged: readonly { readonly id: number; readonly set: Readonly<Record<string, PropertyValue>> }[];
+}
+
+/** A whole graph at one version, with its ids: a snapshot. */
+export interface GraphSnapshot {
+  readonly version: number;
+  readonly nodes: readonly { readonly id: number; readonly labels: readonly string[]; readonly props: Readonly<Record<string, PropertyValue>> }[];
+  readonly relationships: readonly {
+    readonly id: number;
+    readonly type: string;
+    readonly start: number;
+    readonly end: number;
+    readonly props: Readonly<Record<string, PropertyValue>>;
+  }[];
+}
+
+/** A history in JSON: a starting snapshot and the commits after it. */
+export interface HistoryJSON {
+  readonly base: GraphSnapshot;
+  readonly commits: readonly Commit[];
+}
+
+/** A store's history: read it through `store.history`. */
+export interface HistoryReader {
+  /** The latest version the store holds (for a past view, that view's version). */
+  readonly version: number;
+  /** Commits with versions in (from, to], oldest first; all by default. */
+  commits(from?: number, to?: number): readonly CommitInfo[];
+  /** The full commit, with its changes. */
+  commit(version: number): Commit | undefined;
+  /** The latest version committed at or before `time` (0 when none). */
+  versionAt(time: number): number;
+  /** The graph at a version, read-only. Its own `history` ends at that version. */
+  at(version: number): GraphStore;
+  /** What changed from one version to another, either way. */
+  diff(from: number, to: number): GraphDiff;
+  /** Every change to one node or relationship, oldest first, up to this history's version. */
+  changesOf(kind: 'node' | 'relationship', id: number): readonly EntityChange[];
 }
 
 /** A store's writable half, for code that has checked `capabilities.writes`. */

@@ -169,8 +169,9 @@ export class MemoryStore implements GraphStore {
     this.log(() => this.propIndexes.set(name, idx));
   }
 
-  createNode(labels: readonly string[], props: Readonly<Record<string, PropertyValue>>): number {
-    const id = this.nextNode++;
+  createNode(labels: readonly string[], props: Readonly<Record<string, PropertyValue>>, id?: number): number {
+    id = this.newId(id, this.nodes, 'node');
+    this.nextNode = Math.max(this.nextNode, id + 1);
     const rec: NodeRec = { labels: new Set(), props: new Map(), out: [], in: [] };
     this.nodes.set(id, rec);
     this.log(() => this.nodes.delete(id));
@@ -179,10 +180,11 @@ export class MemoryStore implements GraphStore {
     return id;
   }
 
-  createRel(type: string, start: number, end: number, props: Readonly<Record<string, PropertyValue>>): number {
+  createRel(type: string, start: number, end: number, props: Readonly<Record<string, PropertyValue>>, id?: number): number {
     const s = this.node(start);
     const e = this.node(end);
-    const id = this.nextRel++;
+    id = this.newId(id, this.rels, 'relationship');
+    this.nextRel = Math.max(this.nextRel, id + 1);
     this.rels.set(id, { type, start, end, props: new Map() });
     s.out.push(id);
     e.in.push(id);
@@ -288,6 +290,14 @@ export class MemoryStore implements GraphStore {
     const undo = this.undo;
     this.undo = null;
     if (undo) for (let i = undo.length - 1; i >= 0; i--) undo[i]!();
+  }
+
+  /** The next id, or the one asked for (a replayed history keeps its ids), which must be free. */
+  private newId(id: number | undefined, used: Map<number, unknown>, what: string): number {
+    if (id === undefined) return what === 'node' ? this.nextNode : this.nextRel;
+    if (!Number.isInteger(id) || id < 0) throw new SmaltcyError('SMALTCY_CONSTRAINT', `A ${what} id must be a non-negative integer, not ${id}`);
+    if (used.has(id)) throw new SmaltcyError('SMALTCY_CONSTRAINT', `A ${what} with id ${id} already exists`);
+    return id;
   }
 
   private log(fn: () => void): void {

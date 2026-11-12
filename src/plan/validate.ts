@@ -108,9 +108,19 @@ export function validatePlan(plan: GraphPlan): void {
   };
 
   checkOp(plan.root);
+  if (plan.asOf) {
+    const x = 'version' in plan.asOf ? plan.asOf.version : plan.asOf.time;
+    if (x.k !== 'lit' && x.k !== 'param') bad('asOf takes a literal or a parameter');
+    if (writesIn(plan.root)) bad("a plan that reads a past version can't write");
+  }
   const out = boundSlots(plan.root);
   for (const c of plan.columns) {
     slot(c.slot, `Column ${c.name}`);
     if (!out.has(c.slot)) bad(`column ${c.name} reads ${name(c.slot)}, which isn't bound at the end`);
   }
+}
+
+function writesIn(op: Op): boolean {
+  if (op.op === 'create' || op.op === 'merge' || op.op === 'set' || op.op === 'remove' || op.op === 'delete') return true;
+  return inputs(op).some(writesIn);
 }
