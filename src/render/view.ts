@@ -20,11 +20,13 @@ import { GpuLayout, decayForTicks } from './layout.js';
 import { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT, GroupColors, THEMES, packRgba8, parseColor } from './palette.js';
 import type { Rgba } from './palette.js';
 import { PICK_FORMAT, Picker } from './picking.js';
+import { NONE, hash01, placeNodes, seedPosition } from './place.js';
 import type { PickRequest } from './picking.js';
 import { matchNodes } from './search.js';
 import { DRAW_WGSL } from './shaders/draw.wgsl.js';
+import { ANIM_EXIT, ENTER_MS, EXIT_MS, FLASH_MS, Transitions } from './transition.js';
 import type {
-  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, RenderEdge, RenderGraph, RenderNode, Theme, ViewMode,
+  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, RenderEdge, RenderGraph, RenderNode, SetGraphOptions, Theme, ViewMode,
 } from './types.js';
 
 /** World radius of a node of size 1. */
@@ -33,6 +35,8 @@ const DEPTH_FORMAT: GPUTextureFormat = 'depth24plus';
 const MIRROR_EVERY_TICKS = 12;
 const LABEL_THROTTLE_MS = 120;
 const ANIM_MS = 450;
+/** Bytes of the frame uniform (struct Frame in draw.wgsl.ts). */
+const FRAME_BYTES = 288;
 
 interface Pipelines {
   pick?: boolean;
@@ -55,32 +59,6 @@ function putColor(f: Float32Array, o: number, c: Rgba, alpha: number): void {
   f[o + 3] = c[3] * alpha;
 }
 
-/** Deterministic hash in 0..1 for seeding positions. */
-function hash01(i: number): number {
-  let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
-  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-/** d3-style phyllotaxis seed (a sphere spiral in 3D). */
-function seedPosition(i: number, mode: ViewMode, out: Float32Array, o: number): void {
-  if (mode === '2d') {
-    const r = 10 * Math.sqrt(0.5 + i);
-    const a = i * Math.PI * (3 - Math.sqrt(5));
-    out[o] = r * Math.cos(a);
-    out[o + 1] = r * Math.sin(a);
-    out[o + 2] = 0;
-  } else {
-    const r = 10 * Math.cbrt(0.5 + i);
-    const yaw = i * Math.PI * (3 - Math.sqrt(5));
-    const roll = i * ((Math.PI * 20) / (9 + Math.sqrt(221)));
-    out[o] = r * Math.sin(roll) * Math.cos(yaw);
-    out[o + 1] = r * Math.cos(roll);
-    out[o + 2] = r * Math.sin(roll) * Math.sin(yaw);
-  }
-  out[o + 3] = 1;
-}
-
 export class GraphViewImpl implements GraphView {
   private readonly device: GPUDevice;
   private readonly context: GPUCanvasContext;
@@ -90,7 +68,7 @@ export class GraphViewImpl implements GraphView {
   private readonly glyphBuf: GrowableBuffer;
   private readonly frameBuf: GPUBuffer;
   private readonly pickFrameBuf: GPUBuffer;
-  private readonly frameData = new ArrayBuffer(256);
+  private readonly frameData = new ArrayBuffer(FRAME_BYTES);
   private readonly frameF32 = new Float32Array(this.frameData);
   private readonly frameU32 = new Uint32Array(this.frameData);
   private readonly bgl: GPUBindGroupLayout;
@@ -131,6 +109,14 @@ export class GraphViewImpl implements GraphView {
   private idIndex = new Map<string | number, number>();
   private readonly groups = new GroupColors();
   private gen = 0;
+  // Transitions: ghosts of removed nodes and edges are drawn after the live ones (slots n.. and m..).
+  private readonly tr = new Transitions();
+  private readonly epoch = performance.now();
+  private animNow = 0;
+  private ghostN = 0;
+  private ghostE = 0;
+  private edgeData = new Uint32Array(64 * 4);
+  private edgeF32 = new Float32Array(this.edgeData.buffer);
 
   // View.
   private mode: ViewMode;
@@ -193,11 +179,11 @@ export class GraphViewImpl implements GraphView {
     this.lay.dims = this.mode === '2d' ? 2 : 3;
     const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
     this.styleBuf = new GrowableBuffer(device, 'render.styles', S, 16);
-    this.edgeBuf = new GrowableBuffer(device, 'render.edges', S, 8);
+    this.edgeBuf = new GrowableBuffer(device, 'render.edges', S, 16);
     this.glyphBuf = new GrowableBuffer(device, 'render.glyphs', S, 16);
     const U = GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST;
-    this.frameBuf = device.createBuffer({ label: 'render.frame', size: 256, usage: U });
-    this.pickFrameBuf = device.createBuffer({ label: 'render.pickFrame', size: 256, usage: U });
+    this.frameBuf = device.createBuffer({ label: 'render.frame', size: FRAME_BYTES, usage: U });
+    this.pickFrameBuf = device.createBuffer({ label: 'render.pickFrame', size: FRAME_BYTES, usage: U });
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     this.picker = new Picker(device);
     this.drawPass = {
@@ -304,11 +290,26 @@ export class GraphViewImpl implements GraphView {
 
   // ---- public API -----------------------------------------------------------------------------
 
-  setGraph(g: RenderGraph, opts?: { keepPositions?: boolean }): void {
+  setGraph(g: RenderGraph, opts?: SetGraphOptions): void {
     if (this.destroyed) return;
+    const animate = !!opts?.animate;
     const keep = !!opts?.keepPositions && this.n > 0;
-    const oldMirror = this.mirror;
-    const oldIndex = this.idIndex;
+    const now = performance.now() - this.epoch;
+    const oldN = this.n;
+    const oldGhosts = this.tr.ghosts;
+    // The CPU's estimate of every old slot: live nodes from the mirror, then the ghosts.
+    const oldPos = new Float32Array(Math.max(oldN + oldGhosts.length, 1) * 4);
+    oldPos.set(this.mirror.subarray(0, Math.min(this.mirror.length, oldN * 4)));
+    for (let k = 0; k < oldGhosts.length; k++) {
+      const gh = oldGhosts[k]!, o = (oldN + k) * 4;
+      oldPos[o] = gh.x;
+      oldPos[o + 1] = gh.y;
+      oldPos[o + 2] = gh.z;
+      oldPos[o + 3] = 1;
+    }
+    const hadSlots = oldN + oldGhosts.length > 0;
+    const diff = this.tr.update(g.nodes, g.edges, now, { animate, changed: opts?.changed, oldPos });
+
     const nodes = g.nodes;
     const n = nodes.length;
     const m = g.edges.length;
@@ -323,58 +324,78 @@ export class GraphViewImpl implements GraphView {
     this.order = degreeOrder(this.csr);
     this.slots = new Uint32Array(n);
     for (let i = 0; i < n; i++) this.slots[i] = this.groups.slot(nodes[i]!.group);
-
-    // Positions: kept by id, new nodes next to a placed neighbour, else on the seed spiral.
-    const pos = new Float32Array(nextCapacity(n, 0) * 4);
-    const placed = new Uint8Array(n);
     const index = new Map<string | number, number>();
-    let kept = 0;
-    for (let i = 0; i < n; i++) {
-      const id = nodes[i]!.id;
-      if (!index.has(id)) index.set(id, i);
-      const old = keep ? oldIndex.get(id) : undefined;
-      if (old !== undefined && old * 4 + 3 < oldMirror.length) {
-        pos.set(oldMirror.subarray(old * 4, old * 4 + 4), i * 4);
-        placed[i] = 1;
-        kept++;
-      }
-    }
-    let seed = keep ? kept : 0;
-    for (let i = 0; i < n; i++) {
-      if (placed[i]) continue;
-      let anchor = -1;
-      if (kept > 0) {
-        for (let k = this.csr.offsets[i]!; k < this.csr.offsets[i + 1]!; k++) {
-          const j = this.csr.neighbors[k]!;
-          if (placed[j]) {
-            anchor = j;
-            break;
-          }
-        }
-      }
-      if (anchor >= 0) {
-        const a = hash01(i) * Math.PI * 2;
-        const r = 8 + 8 * hash01(i + 7919);
-        pos[i * 4] = pos[anchor * 4]! + r * Math.cos(a);
-        pos[i * 4 + 1] = pos[anchor * 4 + 1]! + r * Math.sin(a);
-        pos[i * 4 + 2] = this.mode === '3d' ? pos[anchor * 4 + 2]! + r * (hash01(i + 104729) - 0.5) : 0;
-        pos[i * 4 + 3] = 1;
-      } else {
-        seedPosition(seed++, this.mode, pos, i * 4);
-      }
-      placed[i] = 1;
-    }
+    for (let i = 0; i < n; i++) if (!index.has(nodes[i]!.id)) index.set(nodes[i]!.id, i);
     this.idIndex = index;
-    this.mirror = pos;
-    this.bounds = boundsOf(pos, n);
 
-    this.lay.setGraph(n, pos, this.csr);
-    this.lay.alpha = keep ? Math.max(this.lay.alpha, 0.3 + 0.7 * (1 - kept / Math.max(n, 1))) : 1;
-    this.layoutActive = n > 0;
+    // Positions. Kept nodes (and nodes that come back from a ghost) start where they are; new ones
+    // next to a placed neighbour, else on the seed spiral. Ghosts stay where they were.
+    const ghosts = this.tr.ghosts;
+    const G = ghosts.length;
+    const count = n + G;
+    const cap = nextCapacity(count, 0);
+    const out = { pos: new Float32Array(cap * 4), src: new Uint32Array(cap), offset: new Float32Array(cap * 4) };
+    let kept = 0;
+    if (keep) {
+      for (let i = 0; i < n; i++) if (diff.src[i] !== NONE) kept++;
+      placeNodes(n, this.csr, diff.src, oldPos, this.mode, this.lay.settings.linkDistance, kept, out);
+    } else {
+      for (let i = 0; i < n; i++) {
+        seedPosition(i, this.mode, out.pos, i * 4);
+        out.offset.set(out.pos.subarray(i * 4, i * 4 + 4), i * 4);
+        out.src[i] = NONE;
+      }
+    }
+    for (let k = 0; k < G; k++) {
+      const gh = ghosts[k]!, o = (n + k) * 4;
+      out.pos[o] = gh.x;
+      out.pos[o + 1] = gh.y;
+      out.pos[o + 2] = gh.z;
+      out.pos[o + 3] = 1;
+      out.src[n + k] = gh.at;
+    }
+    this.mirror = out.pos;
+    this.bounds = boundsOf(out.pos, n);
+    if (hadSlots && (keep || G > 0)) this.lay.regraph(n, count, out.src, out.offset, this.csr);
+    else this.lay.setGraph(n, out.pos, this.csr, count);
 
-    this.edgeBuf.ensure(m);
-    this.edgeBuf.write(this.pairs, m);
-    this.styleBuf.ensure(n);
+    if (keep) {
+      // Reheat by how much changed, so that a step of one or two nodes barely moves the rest.
+      const changes = diff.added + diff.removed + 0.5 * (diff.edgesAdded + diff.edgesRemoved);
+      if (changes > 0) this.lay.alpha = Math.max(this.lay.alpha, Math.min(1, 0.02 + changes / Math.max(n, 1)));
+      this.layoutActive = n > 0 && (this.layoutActive || changes > 0);
+    } else {
+      this.lay.alpha = 1;
+      this.layoutActive = n > 0;
+    }
+
+    // Edges: (source, target, transition kind, start), live ones first, then the ghosts.
+    const GE = this.tr.ghostEdges.length;
+    this.edgeBuf.ensure(m + GE);
+    if (this.edgeData.length < this.edgeBuf.capacity * 4) {
+      this.edgeData = new Uint32Array(this.edgeBuf.capacity * 4);
+      this.edgeF32 = new Float32Array(this.edgeData.buffer);
+    }
+    const ed = this.edgeData, ef = this.edgeF32, ek = this.tr.edgeKind, es = this.tr.edgeStart;
+    for (let k = 0; k < m; k++) {
+      ed[k * 4] = this.pairs[2 * k]!;
+      ed[k * 4 + 1] = this.pairs[2 * k + 1]!;
+      ed[k * 4 + 2] = ek[k]! << 1;
+      ef[k * 4 + 3] = es[k]!;
+    }
+    const ge = this.tr.ghostEnds;
+    for (let j = 0; j < GE; j++) {
+      const o = (m + j) * 4;
+      ed[o] = ge[2 * j]!;
+      ed[o + 1] = ge[2 * j + 1]!;
+      ed[o + 2] = ANIM_EXIT << 1;
+      ef[o + 3] = this.tr.ghostEdges[j]!.start;
+    }
+    this.edgeBuf.write(ed, m + GE);
+    this.ghostN = G;
+    this.ghostE = GE;
+
+    this.styleBuf.ensure(count);
     if (this.styleU32.length < this.styleBuf.capacity * 4) {
       this.styleData = new ArrayBuffer(this.styleBuf.capacity * 16);
       this.styleU32 = new Uint32Array(this.styleData);
@@ -818,6 +839,19 @@ export class GraphViewImpl implements GraphView {
       }
     }
 
+    // Transitions run in the shaders from per-element start times; the loop only keeps drawing
+    // until the last one ends, then drops the ghosts.
+    this.animNow = now - this.epoch;
+    if (this.tr.until > 0) {
+      if (this.animNow < this.tr.until) again = true;
+      else {
+        this.tr.dropGhosts();
+        this.ghostN = 0;
+        this.ghostE = 0;
+      }
+      this.needsDraw = true;
+    }
+
     // Camera animation.
     if (this.anim) {
       const a = this.anim;
@@ -860,15 +894,25 @@ export class GraphViewImpl implements GraphView {
     const palette = this.customPalette ?? (this.theme === 'dark' ? FAMILY_PALETTE_DARK : FAMILY_PALETTE_LIGHT);
     const packed = palette.map((c) => packRgba8(parseColor(c)));
     const u = this.styleU32, f = this.styleF32;
+    const kind = this.tr.nodeKind, start = this.tr.nodeStart;
     for (let i = 0; i < this.n; i++) {
       const node = this.nodes[i]!;
       const size = node.size !== undefined && Number.isFinite(node.size) ? Math.max(node.size, 0.05) : 1;
       u[i * 4] = packed[this.slots[i]! % packed.length]!;
       f[i * 4 + 1] = BASE_RADIUS * Math.sqrt(size);
-      u[i * 4 + 2] = this.hl[i]!;
-      u[i * 4 + 3] = 0;
+      u[i * 4 + 2] = this.hl[i]! | (kind[i]! << 1);
+      f[i * 4 + 3] = start[i]!;
     }
-    this.styleBuf.write(this.styleU32, this.n);
+    const ghosts = this.tr.ghosts;
+    for (let k = 0; k < this.ghostN; k++) {
+      const gh = ghosts[k]!, o = (this.n + k) * 4;
+      const size = gh.node.size !== undefined && Number.isFinite(gh.node.size) ? Math.max(gh.node.size, 0.05) : 1;
+      u[o] = packed[this.groups.slot(gh.node.group) % packed.length]!;
+      f[o + 1] = BASE_RADIUS * Math.sqrt(size);
+      u[o + 2] = ANIM_EXIT << 1;
+      f[o + 3] = gh.start;
+    }
+    this.styleBuf.write(this.styleU32, this.n + this.ghostN);
     this.needsDraw = true;
   }
 
@@ -982,23 +1026,34 @@ export class GraphViewImpl implements GraphView {
     u[61] = 1;
     u[62] = this.n;
     u[63] = this.focused + 1;
+    f[64] = this.animNow;
+    f[65] = ENTER_MS;
+    f[66] = EXIT_MS;
+    f[67] = FLASH_MS;
+    u[68] = this.n + this.ghostN;
+    u[69] = 0;
+    u[70] = 0;
+    u[71] = 0;
   }
 
   private encodeScene(pass: GPURenderPassEncoder, p: Pipelines): void {
     // 2D: edges under nodes. 3D: nodes first so that edges are depth-tested against them, except
     // when picking, where nodes are drawn last so that a node wins over an edge in front of it.
+    // Ghosts (after the live slots) are drawn but never picked.
+    const nodes = p.pick ? this.n : this.n + this.ghostN;
+    const edges = p.pick ? this.m : this.m + this.ghostE;
     const nodesFirst = this.mode === '3d' && !p.pick;
-    if (nodesFirst && this.n > 0) {
+    if (nodesFirst && nodes > 0) {
       pass.setPipeline(p.node);
-      pass.draw(6, this.n);
+      pass.draw(6, nodes);
     }
-    if (this.m > 0) {
+    if (edges > 0) {
       pass.setPipeline(p.edge);
-      pass.draw(12, this.m);
+      pass.draw(12, edges);
     }
-    if (!nodesFirst && this.n > 0) {
+    if (!nodesFirst && nodes > 0) {
       pass.setPipeline(p.node);
-      pass.draw(6, this.n);
+      pass.draw(6, nodes);
     }
     if (p.label && this.glyphCount > 0) {
       pass.setPipeline(p.label);

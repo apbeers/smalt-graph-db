@@ -9,6 +9,11 @@ export interface RenderNode {
 }
 
 export interface RenderEdge {
+  /**
+   * Identity across `setGraph` calls, for animated transitions. Without one, an edge is identified by
+   * its source id, target id and label.
+   */
+  id?: string | number;
   /** Index into `nodes`. */
   source: number;
   /** Index into `nodes`. */
@@ -20,6 +25,19 @@ export interface RenderEdge {
 export interface RenderGraph {
   nodes: RenderNode[];
   edges: RenderEdge[];
+}
+
+export interface SetGraphOptions {
+  /** Nodes whose id was already shown keep their position; new ones start next to a neighbour. */
+  keepPositions?: boolean;
+  /**
+   * Animate the change from the graph shown: new nodes and edges fade and grow in, removed ones fade
+   * and shrink out where they were (they are no longer picked), and the nodes in `changed` flash. A
+   * call while a transition runs takes over from where it is, so calls can follow each other every frame.
+   */
+  animate?: boolean;
+  /** Ids of nodes whose properties changed: with `animate`, they get a brief ring. */
+  changed?: readonly (string | number)[];
 }
 
 export type ViewMode = '2d' | '3d';
@@ -58,7 +76,7 @@ export interface GraphViewStats {
 
 export interface GraphView {
   /** Replace the graph. With `keepPositions`, nodes whose id was already shown keep their position. */
-  setGraph(g: RenderGraph, opts?: { keepPositions?: boolean }): void;
+  setGraph(g: RenderGraph, opts?: SetGraphOptions): void;
   /** Switch between 2D and 3D, reusing the layout. */
   setMode(mode: ViewMode): void;
   setTheme(theme: Theme): void;

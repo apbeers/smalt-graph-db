@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
+import { inflateSync } from 'node:zlib';
 import * as esbuild from 'esbuild';
 
 const require = createRequire(import.meta.url);
@@ -41,6 +42,53 @@ function check(cond, msg) {
     failures++;
     console.log(`  FAIL ${msg}`);
   }
+}
+
+// Decode an 8-bit RGB(A) PNG (what Playwright's screenshots are) into { width, height, rgba }.
+function decodePng(buf) {
+  let o = 8, width = 0, height = 0, type = 0;
+  const idat = [];
+  while (o < buf.length) {
+    const len = buf.readUInt32BE(o), kind = buf.toString('ascii', o + 4, o + 8);
+    const data = buf.subarray(o + 8, o + 8 + len);
+    if (kind === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      type = data[9];
+    } else if (kind === 'IDAT') idat.push(data);
+    o += 12 + len;
+  }
+  const bpp = type === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * bpp;
+  const px = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y++) {
+    const f = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const v = raw[y * (stride + 1) + 1 + x];
+      const a = x >= bpp ? px[y * stride + x - bpp] : 0;
+      const b = y > 0 ? px[(y - 1) * stride + x] : 0;
+      const c = x >= bpp && y > 0 ? px[(y - 1) * stride + x - bpp] : 0;
+      let p;
+      if (f === 0) p = 0;
+      else if (f === 1) p = a;
+      else if (f === 2) p = b;
+      else if (f === 3) p = (a + b) >> 1;
+      else {
+        const q = a + b - c, pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c);
+        p = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      px[y * stride + x] = (v + p) & 255;
+    }
+  }
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    rgba[i * 4] = px[i * bpp];
+    rgba[i * 4 + 1] = px[i * bpp + 1];
+    rgba[i * 4 + 2] = px[i * bpp + 2];
+    rgba[i * 4 + 3] = bpp === 4 ? px[i * bpp + 3] : 255;
+  }
+  return { width, height, rgba };
 }
 
 const PAGE = `<!doctype html>
@@ -437,6 +485,210 @@ async function main() {
       return { maxShift, n: p1.length / 3 };
     });
     check(keep.n === 48 && keep.maxShift < 1e-3, `keepPositions keeps existing nodes in place (max shift ${keep.maxShift})`);
+
+    // ---- animated transitions -----------------------------------------------------------------
+    console.log('Transitions (setGraph with animate)');
+    // How far a 12×12 px patch of the page at a canvas point differs from the page's background.
+    const patchInk = async (p) => {
+      const png = await page.screenshot({ clip: { x: box.x + p.x - 6, y: box.y + p.y - 6, width: 12, height: 12 } });
+      const { rgba } = decodePng(png);
+      let ink = 0;
+      for (let i = 0; i < rgba.length; i += 4) ink = Math.max(ink, Math.abs(rgba[i] - 0xf5) + Math.abs(rgba[i + 1] - 0xf6) + Math.abs(rgba[i + 2] - 0xf8));
+      return ink;
+    };
+    await page.evaluate(async () => {
+      const view = window.view;
+      // A tree of 48 people, as above, settled and framed; then steps of a small history.
+      window.base = () => {
+        const nodes = [];
+        for (let i = 0; i < 48; i++) nodes.push({ id: i, label: `n${i}`, group: ['Person', 'Company', 'City'][i % 3] });
+        const edges = [];
+        for (let i = 1; i < 48; i++) edges.push({ source: i, target: Math.floor((i - 1) / 3) });
+        return { nodes, edges };
+      };
+      // Mid-transition and when it is over: a fixed time after the call, waiting on frames.
+      window.after = async (t0, ms) => {
+        while (performance.now() - t0 < ms) await window.waitFrames(1);
+      };
+      view.setGraph(window.base(), { keepPositions: true });
+      await window.settle(view, 60000);
+      view.fit();
+      await window.waitFrames(30);
+      await window.settle(view, 60000);
+      await view.sync();
+    });
+    const add = await page.evaluate(async () => {
+      const view = window.view;
+      const p0 = await view.positions();
+      const g = window.base();
+      g.nodes.push({ id: 'a1', label: 'added 1', group: 'Tag' }, { id: 'a2', label: 'added 2', group: 'Tag' });
+      g.edges.push({ source: 48, target: 47 }, { source: 49, target: 30 });
+      view.setGraph(g, { keepPositions: true, animate: true });
+      window.__t0 = performance.now();
+      await window.waitFrames(2);
+      return { p0: Array.from(p0), nodes: view.stats().nodes };
+    });
+    check(add.nodes === 50, `added nodes count at once (${add.nodes})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-in.png') });
+    const added = await page.evaluate(async (p0) => {
+      const view = window.view;
+      await window.after(window.__t0, 450);
+      await view.sync();
+      const hits = [];
+      for (const i of [48, 49]) {
+        const p = view.screenPosition(i);
+        const hit = await view.pick(p.x, p.y);
+        hits.push(hit?.kind === 'node' && hit.index === i);
+      }
+      const near = view.screenPosition(48), anchor = view.screenPosition(47);
+      const settled = await window.settle(view, 60000);
+      await view.sync();
+      const p1 = await view.positions();
+      // Pixels per world unit, from two nodes far apart.
+      const a = view.screenPosition(0), b = view.screenPosition(40);
+      const k = Math.hypot(a.x - b.x, a.y - b.y) / Math.hypot(p1[0] - p1[120], p1[1] - p1[121]);
+      // Without the drift of the whole drawing (the camera follows it), how far each node moved.
+      let tx = 0, ty = 0;
+      for (let i = 0; i < 48; i++) {
+        tx += (p1[i * 3] - p0[i * 3]) / 48;
+        ty += (p1[i * 3 + 1] - p0[i * 3 + 1]) / 48;
+      }
+      const shifts = [];
+      for (let i = 0; i < 48; i++) shifts.push(Math.hypot(p1[i * 3] - p0[i * 3] - tx, p1[i * 3 + 1] - p0[i * 3 + 1] - ty) * k);
+      shifts.sort((x, y) => x - y);
+      return { hits, settled: settled.settled, median: shifts[24], max: shifts[47], drift: Math.hypot(tx, ty) * k, startGap: Math.hypot(near.x - anchor.x, near.y - anchor.y) };
+    }, add.p0);
+    check(added.hits.every(Boolean), `new nodes are drawn and picked after the transition (${added.hits})`);
+    check(added.startGap < 120, `a new node starts next to its neighbour (${added.startGap.toFixed(0)} px away)`);
+    check(added.settled && added.median < 2 && added.max < 8, `adding 2 nodes barely moves the rest (median ${added.median.toFixed(2)} px, max ${added.max.toFixed(1)} px, drift ${added.drift.toFixed(1)} px)`);
+
+    // Removal: a leaf goes; it is no longer picked at once, and gone from the drawing after the transition.
+    const leaf = await page.evaluate(async () => {
+      const view = window.view;
+      await view.sync();
+      return view.screenPosition(46);
+    });
+    const inkBefore = await patchInk(leaf);
+    const removed = await page.evaluate(async (leaf) => {
+      const view = window.view;
+      const g = window.base();
+      g.nodes.push({ id: 'a1', label: 'added 1', group: 'Tag' }, { id: 'a2', label: 'added 2', group: 'Tag' });
+      g.edges.push({ source: 48, target: 47 }, { source: 49, target: 30 });
+      // Drop node 46 (a leaf: its only edge is 46 → 15).
+      g.nodes.splice(46, 1);
+      g.edges = g.edges.filter((e) => e.source !== 46 && e.target !== 46).map((e) => ({ source: e.source > 46 ? e.source - 1 : e.source, target: e.target > 46 ? e.target - 1 : e.target }));
+      view.setGraph(g, { keepPositions: true, animate: true });
+      window.__t0 = performance.now();
+      const hit = await view.pick(leaf.x, leaf.y);
+      let gone = true;
+      if (hit?.kind === 'node') {
+        const q = view.screenPosition(hit.index);
+        gone = !q || Math.hypot(q.x - leaf.x, q.y - leaf.y) > 6;
+      }
+      await window.waitFrames(2);
+      return { gone, hit, nodes: view.stats().nodes };
+    }, leaf);
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-out.png') });
+    check(removed.nodes === 49 && removed.gone, `a removed node is not picked, even while it fades (${JSON.stringify(removed.hit)})`);
+    await page.evaluate(async () => {
+      window.view.layout.stop();
+      await window.after(window.__t0, 450);
+      await window.waitFrames(3);
+    });
+    const inkAfter = await patchInk(leaf);
+    check(inkBefore > 60 && inkAfter < 20, `a removed node is gone from the drawing after the transition (ink ${inkBefore} → ${inkAfter})`);
+
+    // A property change flashes a ring.
+    await page.evaluate(async () => {
+      const view = window.view;
+      view.layout.start();
+      const g = window.base();
+      view.setGraph(g, { keepPositions: true, animate: true, changed: [0, 1, 2] });
+      await window.waitFrames(2);
+    });
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-flash.png') });
+
+    // Scrubbing: 30 versions in a row synchronously, then one per frame back and forth; it settles without errors.
+    const scrub = await page.evaluate(async () => {
+      const view = window.view;
+      const version = (v) => {
+        const g = window.base();
+        // Version v: the base tree minus its last (v % 7) leaves, plus a chain of v new nodes.
+        const drop = v % 7;
+        g.nodes.length -= drop;
+        g.edges = g.edges.filter((e) => e.source < g.nodes.length && e.target < g.nodes.length);
+        const base = g.nodes.length;
+        for (let k = 0; k < v; k++) {
+          g.nodes.push({ id: `v${k}`, label: `v${k}`, group: 'Event' });
+          g.edges.push({ source: base + k, target: k === 0 ? 0 : base + k - 1, label: 'NEXT' });
+        }
+        return g;
+      };
+      const t0 = performance.now();
+      for (let v = 0; v < 30; v++) view.setGraph(version(v), { keepPositions: true, animate: true, changed: [v % 10] });
+      const syncMs = performance.now() - t0;
+      for (let v = 29; v >= 0; v--) {
+        view.setGraph(version(v), { keepPositions: true, animate: true });
+        await window.waitFrames(1);
+      }
+      for (let v = 0; v <= 12; v++) {
+        view.setGraph(version(v), { keepPositions: true, animate: true });
+        await window.waitFrames(1);
+      }
+      const run = await window.settle(view, 60000);
+      window.__t0 = performance.now();
+      await window.after(window.__t0, 400);
+      const pos = await view.positions();
+      let finite = true;
+      for (const x of pos) if (!Number.isFinite(x)) finite = false;
+      // Idle afterwards: no frames are drawn once the transitions and the layout are done.
+      const frames0 = view.stats().fps;
+      await window.after(performance.now(), 3500);
+      const idleFps = view.stats().fps;
+      return { syncMs, settled: run.settled, finite, nodes: view.stats().nodes, expected: version(12).nodes.length, frames0, idleFps };
+    });
+    check(scrub.settled && scrub.finite && scrub.nodes === scrub.expected, `scrubbing through 73 versions settles (${scrub.nodes} nodes; 30 synchronous calls in ${scrub.syncMs.toFixed(0)} ms)`);
+    check(scrub.idleFps === 0, `the view goes idle after the transitions (${scrub.idleFps} fps)`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-scrubbed.png') });
+
+    // 3D and dark: the same transitions.
+    const t3 = await page.evaluate(async () => {
+      const view = window.view;
+      document.body.classList.add('dark');
+      view.setTheme('dark');
+      view.setMode('3d');
+      view.setGraph(window.base(), { keepPositions: true, animate: true });
+      await window.settle(view, 60000);
+      view.fit();
+      await window.waitFrames(30);
+      const g = window.base();
+      for (let k = 0; k < 6; k++) {
+        g.nodes.push({ id: `d${k}`, label: `new ${k}`, group: 'Tag' });
+        g.edges.push({ source: 48 + k, target: k * 7 });
+      }
+      g.nodes.splice(40, 1);
+      g.edges = g.edges.filter((e) => e.source !== 40 && e.target !== 40).map((e) => ({ source: e.source > 40 ? e.source - 1 : e.source, target: e.target > 40 ? e.target - 1 : e.target }));
+      view.setGraph(g, { keepPositions: true, animate: true, changed: [0] });
+      window.__t0 = performance.now();
+      await window.waitFrames(2);
+      return view.stats().nodes;
+    });
+    await page.locator('canvas').screenshot({ path: join(shots, 'render-transition-3d-dark.png') });
+    const t3after = await page.evaluate(async () => {
+      const view = window.view;
+      await window.after(window.__t0, 450);
+      await view.sync();
+      const p = view.screenPosition(view.stats().nodes - 1);
+      const hit = p ? await view.pick(p.x, p.y) : null;
+      await window.settle(view, 60000);
+      document.body.classList.remove('dark');
+      view.setTheme('light');
+      view.setMode('2d');
+      view.setGraph(window.base());
+      await window.settle(view, 60000);
+      return hit;
+    });
+    check(t3 === 53 && t3after?.kind === 'node', `3D: new nodes appear and are picked after the transition (${JSON.stringify(t3after)})`);
     const framedSmall = await page.evaluate(async () => {
       window.view.setMode('3d');
       await window.settle(window.view, 60000);

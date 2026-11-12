@@ -148,3 +148,40 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
   vel[i] = vec4f(v, 0.0);
 }
 `;
+
+/**
+ * Builds the start positions of a new graph from the current ones, on the GPU: slot i takes old slot
+ * src[i] plus off[i], or off[i] alone when src[i] is NONE. Kept nodes and ghosts start exactly where
+ * they are drawn, whatever the CPU last read back.
+ */
+export const GATHER_WGSL = /* wgsl */ `
+struct G {
+  count: u32,
+  dims: u32,
+  _p0: u32,
+  _p1: u32,
+}
+
+@group(0) @binding(0) var<uniform> P: G;
+@group(0) @binding(1) var<storage, read> oldPos: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> outPos: array<vec4f>;
+@group(0) @binding(3) var<storage, read> src: array<u32>;
+@group(0) @binding(4) var<storage, read> off: array<vec4f>;
+
+@compute @workgroup_size(256)
+fn gather(@builtin(global_invocation_id) gid: vec3u) {
+  let i = gid.x;
+  if (i >= P.count) {
+    return;
+  }
+  var p = off[i].xyz;
+  let s = src[i];
+  if (s != 0xffffffffu && s < arrayLength(&oldPos)) {
+    p = p + oldPos[s].xyz;
+  }
+  if (P.dims == 2u) {
+    p.z = 0.0;
+  }
+  outPos[i] = vec4f(p, 1.0);
+}
+`;

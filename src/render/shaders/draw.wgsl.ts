@@ -7,6 +7,9 @@
  * signed-distance anti-aliasing needs.
  *
  * Colours are premultiplied (canvas alphaMode 'premultiplied').
+ *
+ * Transitions (fade and grow in, fade and shrink out, a ring for a change) are computed here from a
+ * kind and a start time per node and edge and the frame's clock, so they cost the CPU nothing per frame.
  */
 export const DRAW_WGSL = /* wgsl */ `
 struct Frame {
@@ -23,19 +26,21 @@ struct Frame {
   atlas: vec4f,      // atlas w, atlas h, label gap px, edge width px
   flags: vec4u,      // hovered node + 1, hovered edge + 1, highlight active, mode (0 = 2D, 1 = 3D)
   flags2: vec4u,     // pick pass, arrows, node count, focused node + 1
+  anim: vec4f,       // clock ms, enter ms, exit ms, flash ms
+  counts: vec4u,     // node slots drawn (live nodes, then ghosts)
 }
 
 struct NodeStyle {
   color: u32,
   radius: f32,
-  flags: u32,        // 1 = highlighted
-  _pad: u32,
+  flags: u32,        // bit 0: highlighted; bits 1-2: transition (1 enter, 2 exit, 3 flash)
+  start: f32,        // transition start, on the frame's clock
 }
 
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> pos: array<vec4f>;
 @group(0) @binding(2) var<storage, read> styles: array<NodeStyle>;
-@group(0) @binding(3) var<storage, read> edges: array<vec2u>;
+@group(0) @binding(3) var<storage, read> edges: array<vec4u>; // source, target, transition << 1, start (f32 bits)
 @group(0) @binding(4) var<storage, read> glyphs: array<vec4u>;
 @group(0) @binding(5) var atlasTex: texture_2d<f32>;
 @group(0) @binding(6) var atlasSamp: sampler;
@@ -65,9 +70,37 @@ fn is3d() -> bool {
   return F.flags.w == 1u;
 }
 
+fn easeOut(t: f32) -> f32 {
+  let u = 1.0 - t;
+  return 1.0 - u * u * u;
+}
+
+// A transition at this point: x = size, y = opacity, z = ring strength, w = ring progress 0..1.
+fn transition(kind: u32, start: f32) -> vec4f {
+  if (kind == 0u) {
+    return vec4f(1.0, 1.0, 0.0, 0.0);
+  }
+  let el = F.anim.x - start;
+  if (kind == 1u) {
+    let t = easeOut(clamp(el / F.anim.y, 0.0, 1.0));
+    return vec4f(mix(0.25, 1.0, t), t, 0.0, 0.0);
+  }
+  if (kind == 2u) {
+    let t = easeOut(1.0 - clamp(el / F.anim.z, 0.0, 1.0));
+    return vec4f(mix(0.25, 1.0, t), t, 0.0, 0.0);
+  }
+  let t = clamp(el / F.anim.w, 0.0, 1.0);
+  return vec4f(1.0, 1.0, (1.0 - t) * (1.0 - t), easeOut(t));
+}
+
+fn nodeTransition(i: u32) -> vec4f {
+  return transition((styles[i].flags >> 1u) & 3u, styles[i].start);
+}
+
 fn radiusPx(i: u32, w: f32) -> f32 {
   let dpr = F.viewport.z;
-  var r = max(styles[i].radius * F.viewport.w / max(w, 1e-6), select(1.75, 2.25, is3d()) * dpr);
+  let grow = nodeTransition(i).x;
+  var r = max(styles[i].radius * grow * F.viewport.w / max(w, 1e-6), select(1.75, 2.25, is3d()) * dpr * grow);
   if (isPick()) {
     r = max(r, 5.0 * dpr);
   }
@@ -96,7 +129,7 @@ struct NodeOut {
   @builtin(position) position: vec4f,
   @location(0) local: vec2f,
   @location(1) @interpolate(flat) color: vec4f,
-  @location(2) @interpolate(flat) info: vec4f, // radius px, ring, alpha, unused
+  @location(2) @interpolate(flat) info: vec4f, // radius px, ring strength, alpha, ring offset px
   @location(3) @interpolate(flat) id: u32,
 }
 
@@ -111,16 +144,19 @@ fn vs_node(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   }
   let dpr = F.viewport.z;
   let r = radiusPx(ii, c.w);
+  let tr = nodeTransition(ii);
   let ring = emphasized(ii) && !isPick();
-  let ext = r + select(1.0, 4.75 * dpr, ring) + 1.0;
+  let flash = select(tr.z, 0.0, isPick());
+  let ringOffset = select(0.0, tr.w * 5.0 * dpr, flash > 0.0);
+  let ext = r + select(1.0, 4.75 * dpr + ringOffset, ring || flash > 0.0) + 1.0;
   o.local = QUAD[vi] * ext;
   o.position = toClip(clipToPx(c) + o.local, c.z / c.w);
-  var a = fogFactor(c.w);
+  var a = fogFactor(c.w) * tr.y;
   if (dimmed(ii)) {
     a = a * F.fog.w;
   }
   o.color = unpack4x8unorm(styles[ii].color);
-  o.info = vec4f(r, select(0.0, 1.0, ring), a, 0.0);
+  o.info = vec4f(r, max(select(0.0, 1.0, ring), flash), a, ringOffset);
   return o;
 }
 
@@ -148,10 +184,10 @@ fn fs_node(in: NodeOut) -> @location(0) vec4f {
   }
   var rgb = col * fill;
   var a = fill;
-  if (in.info.y > 0.5) {
-    let r0 = r + 1.25 * dpr;
+  if (in.info.y > 0.0) {
+    let r0 = r + 1.25 * dpr + in.info.w;
     let r1 = r0 + 2.25 * dpr;
-    let ring = clamp(min(d - r0 + 0.5, r1 - d + 0.5), 0.0, 1.0);
+    let ring = clamp(min(d - r0 + 0.5, r1 - d + 0.5), 0.0, 1.0) * in.info.y;
     rgb = rgb + F.accent.rgb * ring * (1.0 - a);
     a = a + ring * (1.0 - a);
   }
@@ -187,8 +223,12 @@ fn vs_edge(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   o.position = HIDDEN;
   o.id = (ii + 1u) | EDGE_BIT;
   let e = edges[ii];
-  let n = F.flags2.z;
+  let n = F.counts.x;
   if (e.x >= n || e.y >= n || e.x == e.y) {
+    return o;
+  }
+  let tr = transition((e.z >> 1u) & 3u, bitcast<f32>(e.w));
+  if (tr.y <= 0.0 && !isPick()) {
     return o;
   }
   var ca = F.viewProj * vec4f(pos[e.x].xyz, 1.0);
@@ -231,6 +271,7 @@ fn vs_edge(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   if (strong || hovered) {
     hw = hw * 1.6;
   }
+  hw = hw * mix(0.4, 1.0, tr.x);
   if (isPick()) {
     hw = max(hw, 3.0 * dpr);
   }
@@ -276,7 +317,7 @@ fn vs_edge(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
   } else if (strong) {
     col = F.edgeStrong;
   }
-  var a = col.a;
+  var a = col.a * tr.y;
   if (dim) {
     a = a * F.fog.w;
   }
@@ -350,7 +391,7 @@ fn vs_label(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
   let slot = vec2f(f32(g.y % cols), f32(g.y / cols));
   o.uv = (slot + corner) * cell / F.atlas.xy;
   o.position = toClip(p, 0.0);
-  var a = fogFactor(c.w);
+  var a = fogFactor(c.w) * nodeTransition(node).y;
   if (dimmed(node)) {
     a = a * 0.35;
   }

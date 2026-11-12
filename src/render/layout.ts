@@ -1,7 +1,7 @@
 /** The force-directed layout on the GPU (see shaders/layout.wgsl.ts for the forces). */
 import type { Csr } from './csr.js';
 import { GrowableBuffer } from './gpu.js';
-import { LAYOUT_WGSL } from './shaders/layout.wgsl.js';
+import { GATHER_WGSL, LAYOUT_WGSL } from './shaders/layout.wgsl.js';
 
 const TILE = 256;
 /** Above this many nodes, repulsion samples a rotating subset of tiles each tick. */
@@ -57,6 +57,11 @@ export class GpuLayout {
   private readonly paramU32 = new Uint32Array(this.paramData);
   private readonly paramF32 = new Float32Array(this.paramData);
   private readonly pipeline: GPUComputePipeline;
+  private readonly gatherPipeline: GPUComputePipeline;
+  private readonly gatherParams: GPUBuffer;
+  private readonly gatherData = new Uint32Array(4);
+  private readonly gatherSrc: GrowableBuffer;
+  private readonly gatherOff: GrowableBuffer;
   private bindGroup: GPUBindGroup | null = null;
   private bindKey = '';
   private pinnedData = new Uint32Array(64);
@@ -87,6 +92,11 @@ export class GpuLayout {
     this.params = device.createBuffer({ label: 'layout.params', size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const module = device.createShaderModule({ label: 'layout', code: LAYOUT_WGSL });
     this.pipeline = device.createComputePipeline({ label: 'layout.tick', layout: 'auto', compute: { module, entryPoint: 'tick' } });
+    const gather = device.createShaderModule({ label: 'layout.gather', code: GATHER_WGSL });
+    this.gatherPipeline = device.createComputePipeline({ label: 'layout.gather', layout: 'auto', compute: { module: gather, entryPoint: 'gather' } });
+    this.gatherParams = device.createBuffer({ label: 'layout.gatherParams', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.gatherSrc = new GrowableBuffer(device, 'layout.gatherSrc', S, 4);
+    this.gatherOff = new GrowableBuffer(device, 'layout.gatherOff', S, 16);
     this.query = timestamps
       ? {
           set: device.createQuerySet({ type: 'timestamp', count: 2 }),
@@ -100,17 +110,74 @@ export class GpuLayout {
       : null;
   }
 
-  /** Upload a graph: positions are stride-4 (xyzw), velocities reset. */
-  setGraph(n: number, positions: Float32Array, csr: Csr): void {
+  /**
+   * Upload a graph: positions are stride-4 (xyzw), velocities reset. `count` ≥ n slots are written:
+   * the ones after n are drawn (ghosts of removed nodes) but take no part in the layout.
+   */
+  setGraph(n: number, positions: Float32Array, csr: Csr, count = n): void {
+    this.resize(n, count, csr);
+    this.pos.write(positions, count);
+    this.resetState(csr);
+  }
+
+  /**
+   * Upload a graph whose start positions are gathered on the GPU from the current ones: slot i of
+   * `count` takes old slot `src[i]` plus `offset[i]` (xyzw), or `offset[i]` alone when `src[i]` is
+   * 0xffffffff. Old slots are the slots of the previous upload (its ghosts included).
+   */
+  regraph(n: number, count: number, src: Uint32Array, offset: Float32Array, csr: Csr): void {
+    if (count === 0) {
+      this.setGraph(n, new Float32Array(0), csr, 0);
+      return;
+    }
+    const device = this.device;
+    this.gatherSrc.ensure(count);
+    this.gatherOff.ensure(count);
+    this.gatherSrc.write(src, count);
+    this.gatherOff.write(offset, count);
+    this.next.ensure(count);
+    this.gatherData[0] = count;
+    this.gatherData[1] = this.dims;
+    device.queue.writeBuffer(this.gatherParams, 0, this.gatherData);
+    const bind = device.createBindGroup({
+      label: 'layout.gather',
+      layout: this.gatherPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.gatherParams } },
+        { binding: 1, resource: { buffer: this.pos.buffer } },
+        { binding: 2, resource: { buffer: this.next.buffer } },
+        { binding: 3, resource: { buffer: this.gatherSrc.buffer } },
+        { binding: 4, resource: { buffer: this.gatherOff.buffer } },
+      ],
+    });
+    let enc = device.createCommandEncoder({ label: 'layout.gather' });
+    const pass = enc.beginComputePass({ label: 'layout.gather' });
+    pass.setPipeline(this.gatherPipeline);
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(Math.ceil(count / TILE));
+    pass.end();
+    device.queue.submit([enc.finish()]);
+    // Submitted: the old position buffer may now be replaced.
+    this.resize(n, count, csr);
+    enc = device.createCommandEncoder({ label: 'layout.gatherCopy' });
+    enc.copyBufferToBuffer(this.next.buffer, 0, this.pos.buffer, 0, count * 16);
+    device.queue.submit([enc.finish()]);
+    this.resetState(csr);
+  }
+
+  private resize(n: number, count: number, csr: Csr): void {
     if (n !== this.n) this.msPerTick = 0;
     this.n = n;
-    this.pos.ensure(n);
-    this.next.ensure(n);
+    this.pos.ensure(count);
+    this.next.ensure(count);
     this.vel.ensure(n);
     this.pinned.ensure(n);
     this.offsets.ensure(n + 1);
     this.nbrs.ensure(csr.neighbors.length);
-    this.pos.write(positions, n);
+  }
+
+  private resetState(csr: Csr): void {
+    const n = this.n;
     const zeros = new Float32Array(this.vel.capacity * 4);
     this.vel.write(zeros, this.vel.capacity);
     if (this.pinnedData.length < this.pinned.capacity) this.pinnedData = new Uint32Array(this.pinned.capacity);
@@ -243,8 +310,9 @@ export class GpuLayout {
   }
 
   destroy(): void {
-    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs]) b.destroy();
+    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs, this.gatherSrc, this.gatherOff]) b.destroy();
     this.params.destroy();
+    this.gatherParams.destroy();
     for (const b of this.staging) b.destroy();
     if (this.query) {
       this.query.set.destroy();
