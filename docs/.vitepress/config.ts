@@ -78,6 +78,7 @@ export default defineConfig({
         items: [
           { text: 'Getting started', link: '/guide/getting-started' },
           { text: 'Using the pieces', link: '/guide/modules' },
+          { text: 'Time travel', link: '/guide/time-travel' },
           { text: 'Examples', link: '/guide/examples' },
           { text: 'Sample data', link: '/guide/sample-data' },
           { text: 'Tech demo: big graphs', link: '/demo' },
@@ -109,6 +110,7 @@ export default defineConfig({
         items: [
           { text: 'Decisions', link: '/adr/' },
           { text: '0001 smaltcy', link: '/adr/0001-smaltcy' },
+          { text: '0002 Graph history', link: '/adr/0002-graph-history' },
           { text: 'Benchmarks', link: '/research/benchmarks' },
         ],
       },

@@ -25,6 +25,7 @@ piece and what's beneath it, nothing more.
 | `@smaltworks/smaltcy/engine` | Run plans from any language or program, on any store | the plan format, the stores, the function library |
 | `@smaltworks/smaltcy/plan` | Build, check and send plans: types, builders, `validatePlan` | the function library |
 | `@smaltworks/smaltcy/store` | Use or write a memory structure: `GraphStore`, `MemoryStore`, `CsrStore` | nothing |
+| `@smaltworks/smaltcy/history` | Keep every version of a graph: `HistoryStore`, past versions, diffs ([time travel](./time-travel)) | the stores |
 | `@smaltworks/smaltcy/functions` | Add functions every language sees; compare values as Cypher does | nothing |
 | `@smaltworks/smaltcy/render` | Draw any graph with WebGPU, in 2D or 3D | nothing |
 | `@smaltworks/smaltcy/client` | Query a graph that runs in a Web Worker | nothing (about 3 KB) |

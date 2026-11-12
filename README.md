@@ -12,7 +12,8 @@ to **graph plans**, plain JSON that the engine validates and runs, and the engin
 graphs in 2D and 3D, with the force layout in compute shaders.
 
 > **Status: 0.1.0, work in progress.** A Cypher subset (reading clauses, writes, variable-length and shortest paths,
-> aggregates, `EXPLAIN`), two stores, a Web Worker client, JSON import and export, and the GPU renderer. Graphs live
+> aggregates, `EXPLAIN`), two stores, graph history with time travel (`AT VERSION`, `AT TIME`), a Web Worker client, JSON
+> import and export, and the GPU renderer. Graphs live
 > in memory; durable storage comes with smaltdb ([ADR 0001](docs/adr/0001-smaltcy.md)).
 
 ## Install
@@ -60,6 +61,7 @@ keeps the boundaries.
 | `/engine` | `src/engine/` | Run plans: match planner, operators, EXPLAIN, JSON import and export | plan, store, functions |
 | `/plan` | `src/plan/` | Build, check and send plans | functions |
 | `/store` | `src/store/` | Use or write a memory structure | — |
+| `/history` | `src/history/` | Keep every version: time travel, diffs | store |
 | `/functions` | `src/functions/` | The function library; add your own | — |
 | `/render` | `src/render/` | Draw any graph with WebGPU, 2D and 3D | — |
 | `/client` | `src/client/` | Talk to a graph in a Web Worker (about 3 KB) | — |

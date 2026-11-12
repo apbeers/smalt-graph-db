@@ -22,6 +22,7 @@ differs](./divergences) lists the known differences.
 | `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.key)` | Also `CREATE INDEX ON :Label(key)` |
 | `DROP INDEX ON :Label(key)` | |
 | `EXPLAIN …` | The plan, not the rows |
+| `AT VERSION n …`, `AT TIME t …` | Read the graph as it was, for a graph that keeps history ([time travel](/guide/time-travel)). `n` and `t` are values or parameters; `t` is ISO 8601 text or milliseconds. smaltcy's own: not openCypher |
 
 ## Patterns
 

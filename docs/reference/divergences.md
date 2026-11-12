@@ -22,6 +22,11 @@ Numbers are JavaScript doubles. Whether a value is an integer or a float is know
 - `shortestPath` with a `WHERE` that filters the path: the condition is checked after the shortest paths are found,
   not during the search.
 
+## Extensions
+
+- `AT VERSION n` and `AT TIME t` before a query, and the functions `version()`, `commits()`, `commit()` and
+  `history()`, read a graph's history ([time travel](/guide/time-travel)). They aren't openCypher.
+
 ## Other differences
 
 - Ids are the store's integers. CsrStore numbers nodes again when it's built.

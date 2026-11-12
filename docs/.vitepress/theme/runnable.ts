@@ -12,7 +12,9 @@ import type { GraphClient } from '../../../src/worker/client'
 import type { GraphView } from '../../../src/render/index'
 import { collect, controlsHint, encodeCode, fmt, toRender } from './graph-results'
 
-export const DATASETS = ['social', 'family', 'metro', 'network'] as const
+export const DATASETS = ['social', 'family', 'metro', 'network', 'ontology'] as const
+/** Datasets the examples load with their history, for AT VERSION, AT TIME and the temporal functions. */
+export const WITH_HISTORY: ReadonlySet<DatasetName> = new Set(['ontology'])
 export type DatasetName = (typeof DATASETS)[number]
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -230,7 +232,7 @@ export function enableRunnable(base: string, doc: Document = document): void {
     try {
       const c = await engine()
       const name = ex.getAttribute('data-dataset') as DatasetName
-      const r = await c.run(current(ex), undefined, { dataset: { name, size: DATASET_SIZE[name] } })
+      const r = await c.run(current(ex), undefined, { dataset: { name, size: DATASET_SIZE[name], history: WITH_HISTORY.has(name) } })
       result.replaceChildren()
       if (r.explain) {
         const pre = doc.createElement('pre')

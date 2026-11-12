@@ -36,6 +36,17 @@ type.
 `abs`, `ceil`, `floor`, `round(x [, digits])`, `sqrt`, `sign`, `exp`, `log`, `log10`, `sin`, `cos`, `tan`, `asin`,
 `acos`, `atan`, `atan2`, `pi()`, `e()`, `rand()`.
 
+## History
+
+For a graph that keeps history ([time travel](/guide/time-travel)); `null` otherwise.
+
+| Function | Returns |
+| --- | --- |
+| `version()` | The version the query reads |
+| `commits()` | Every commit up to that version, as maps: `version`, `time`, `at`, `author`, `message`, `changes`, counts |
+| `commit(v)` | One commit, or `null` |
+| `history(x)` | Every change to a node or relationship up to that version: its commit, plus `change`, `key`, `old`, `new`, `label` |
+
 ## Other
 
 `timestamp()`: milliseconds since 1970.

@@ -2,9 +2,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { EXAMPLES, type DatasetKey } from '../docs/.vitepress/theme/components/examples.js';
-import { family, metro, network, social } from '../src/datasets/index.js';
+import { family, metro, network, ontology, social } from '../src/datasets/index.js';
 import { open } from '../src/index.js';
-import { datasetOf, type DatasetName } from '../docs/.vitepress/theme/runnable.js';
+import { WITH_HISTORY, datasetOf, type DatasetName } from '../docs/.vitepress/theme/runnable.js';
 
 /**
  * Every ```cypher block in the docs runs on the dataset the site runs it on (its fence's `dataset=`, else the page's
@@ -29,12 +29,12 @@ for (const file of markdown('docs')) {
   }
 }
 
-const DATA: Record<DatasetName, () => ReturnType<typeof social>> = { social, family, metro, network: () => network(2000) };
+const DATA: Record<DatasetName, () => ReturnType<typeof social>> = { social, family, metro, network: () => network(2000), ontology };
 
 describe('docs examples', () => {
   test('there are examples', () => expect(blocks.length).toBeGreaterThan(20));
   test.each(blocks)('%s', (_where, cypher, dataset) => {
-    const g = open();
+    const g = open({ history: !!dataset && WITH_HISTORY.has(dataset) });
     g.load(DATA[dataset ?? 'social']());
     const r = g.run(cypher, dataset ? {} : { year: 1900 });
     // A runnable example shows something: rows, a plan or what it wrote.

@@ -7,7 +7,7 @@ import { expect, test } from 'vitest';
  * The TypeScript examples in docs/guide/modules.md are type-checked against the package's entry points, so the guide
  * to using the pieces can't drift from the code. Each block is a module of its own.
  */
-const PAGES = ['docs/guide/modules.md'];
+const PAGES = ['docs/guide/modules.md', 'docs/guide/time-travel.md'];
 
 test('the modules guide type-checks', () => {
   const dir = resolve('.cache/docs-ts');
@@ -25,7 +25,7 @@ test('the modules guide type-checks', () => {
   expect(files.length).toBeGreaterThanOrEqual(7);
   const root = resolve('.');
   const paths: Record<string, string[]> = { '@smaltworks/smaltcy': [`${root}/src/index.ts`] };
-  for (const e of ['engine', 'plan', 'functions', 'store', 'cypher', 'render', 'client', 'datasets']) paths[`@smaltworks/smaltcy/${e}`] = [`${root}/src/${e}/index.ts`];
+  for (const e of ['engine', 'plan', 'functions', 'store', 'history', 'cypher', 'render', 'client', 'datasets']) paths[`@smaltworks/smaltcy/${e}`] = [`${root}/src/${e}/index.ts`];
   paths['@smaltworks/smaltcy/worker-runtime'] = [`${root}/src/worker/runtime.ts`];
   writeFileSync(
     join(dir, 'tsconfig.json'),

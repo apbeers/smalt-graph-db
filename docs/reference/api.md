@@ -4,8 +4,9 @@
 
 | Export | What it is |
 | --- | --- |
-| `open({ store })` | A `Graph`: an in-memory `MemoryStore` unless you pass a store |
-| `Graph` | `run(cypher, params)`, `query(cypher, params)`, `explain(cypher)`, `transaction(fn)`, `load(json)`, `toJSON()`, `engine`, `store` |
+| `open({ store, history })` | A `Graph`: an in-memory `MemoryStore` unless you pass a store; with `history`, every version is kept |
+| `Graph` | `run(cypher, params, { author, message })`, `query(…)`, `explain(cypher)`, `transaction(fn, { author, message })`, `load(json)`, `toJSON()`, `engine`, `store` |
+| `Graph`, with history | `version`, `commits(from, to)`, `at(version or Date)`, `diff(from, to)`, `history` |
 | `connect(worker)` | A `GraphClient` for a graph in a Web Worker ([guide](/guide/worker)) |
 | `compile(cypher)` | The plan for a Cypher statement, without running it |
 | `MemoryStore`, `CsrStore` | The [stores](./stores) |
@@ -48,6 +49,7 @@ its own.
 | `@smaltworks/smaltcy/plan` | The plan format, its builders and validator |
 | `@smaltworks/smaltcy/functions` | The function library, value comparisons, `registerFunction` and `registerAggregate` |
 | `@smaltworks/smaltcy/store` | `GraphStore`, `MemoryStore` and `CsrStore` |
+| `@smaltworks/smaltcy/history` | `HistoryStore`, and the types of commits, changes and diffs ([time travel](/guide/time-travel)) |
 | `@smaltworks/smaltcy/cypher` | `compile`, `parse` and `bind`: Cypher to plans |
 | `@smaltworks/smaltcy/render` | The GPU graph view and `resultsToGraph` ([guide](/guide/rendering)) |
 | `@smaltworks/smaltcy/client` | `connect` and `GraphClient`, with no engine: for a page whose graph runs in a worker |

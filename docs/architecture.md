@@ -32,6 +32,7 @@ each on its own. The rules:
 | `plan` | functions |
 | `store` | values (the plan's types only) |
 | `engine` | plan, store, functions |
+| `history` | store (a history is a store that wraps another) |
 | `cypher` | plan, functions; never the engine |
 | `render` | nothing: it draws any graph, and reads results by their shape (`resultsToGraph`) |
 | `client` | the worker protocol: never the engine, a language or the renderer |
