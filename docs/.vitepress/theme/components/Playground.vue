@@ -433,7 +433,7 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .pg-check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; height: 36px; }
 .pg-ghost { height: 36px; padding: 0 12px; border: 1px solid var(--vp-c-divider); border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--vp-c-text-1); }
 .pg-ghost:hover { border-color: var(--vp-c-brand-1); }
-.pg-main { flex: 1; display: grid; grid-template-columns: minmax(340px, 38%) 1fr; gap: 12px; min-height: 0; }
+.pg-main { flex: 1; display: grid; grid-template-columns: minmax(340px, 38%) minmax(0, 1fr); gap: 12px; min-height: 0; }
 .pg-left { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .pg-editor { border: 1px solid var(--vp-c-divider); border-radius: 10px; overflow: hidden; background: var(--vp-code-block-bg); }
 .pg-editor textarea { display: block; width: 100%; min-height: 120px; resize: vertical; padding: 12px 14px; border: 0; background: transparent; color: var(--vp-c-text-1); font-family: var(--vp-font-family-mono); font-size: 14px; line-height: 1.6; }
@@ -474,7 +474,7 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .pg-stats { position: absolute; left: 10px; bottom: 8px; font-family: var(--vp-font-family-mono); font-size: 12px; color: var(--vp-c-text-3); pointer-events: none; }
 @media (max-width: 900px) {
   .pg { height: auto; }
-  .pg-main { grid-template-columns: 1fr; }
-  .pg-view { height: 60vh; }
+  .pg-main { grid-template-columns: minmax(0, 1fr); }
+  .pg-view { height: 60vh; height: 60svh; }
 }
 </style>

@@ -311,7 +311,7 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .td-nums div { padding: 10px 12px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); }
 .td-nums b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .td-nums span { font-size: 12px; color: var(--vp-c-text-2); }
-.td-main { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: 1fr auto; gap: 12px; height: calc(100vh - var(--vp-nav-height) - 240px); min-height: 560px; }
+.td-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: 1fr auto; gap: 12px; height: calc(100vh - var(--vp-nav-height) - 240px); min-height: 560px; }
 .td-view { grid-column: 1; grid-row: 1; }
 .td-side { grid-column: 2; grid-row: 1 / span 2; }
 .td-tl { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 6px; }
@@ -330,8 +330,11 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .td-error { margin: 0; color: var(--vp-c-danger-1); font-size: 14px; }
 .td-note { margin: 0; color: var(--vp-c-text-2); font-size: 13px; line-height: 1.5; }
 @media (max-width: 960px) {
-  .td-main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+  /* minmax(0, …): the column stays the screen's width whatever its content says (the timeline's readout changes as it
+     plays; a plain 1fr would grow with it and shake the page). */
+  .td-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; height: auto; }
   .td-view, .td-side, .td-tl { grid-column: 1; grid-row: auto; }
-  .td-view { height: 65vh; }
+  /* svh: the address bar showing and hiding on a phone doesn't resize the drawing. */
+  .td-view { height: 65vh; height: 65svh; }
 }
 </style>

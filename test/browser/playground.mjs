@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2);
 const shots = resolve(argv.includes('--shots') ? argv[argv.indexOf('--shots') + 1] : join(tmpdir(), 'smaltcy-playground-shots'));
@@ -204,6 +204,33 @@ try {
   await page.click('.td-seg button:has-text("3D")');
   await page.waitForTimeout(3000);
   await page.screenshot({ path: join(shots, 'demo-3d.png') });
+
+  // On a phone, playing the demo's timeline must not move the page: its readout changes length every step, and a
+  // grid column that grows with its content made the whole page shake.
+  {
+    const phone = await browser.newContext({ ...devices['iPhone 13'] });
+    const pp = await phone.newPage();
+    pp.on('pageerror', (e) => errors.push(e.message));
+    await pp.goto(`${site}demo`);
+    await pp.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 90000 });
+    await pp.locator('.td-tl').scrollIntoViewIfNeeded();
+    await pp.locator('.td-tl [role="slider"]').focus();
+    await pp.keyboard.press('Home');
+    await pp.waitForTimeout(500);
+    const layout = () => pp.evaluate(() => {
+      const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return [Math.round(r.top + scrollY), Math.round(r.width), Math.round(r.height)]; };
+      return JSON.stringify({ wide: document.documentElement.scrollWidth > document.documentElement.clientWidth, view: box('.td-view'), tl: box('.td-tl'), side: box('.td-side') });
+    });
+    const seen = new Set([await layout()]);
+    await pp.locator('.td-tl button[aria-label^="Play"]').click();
+    for (let i = 0; i < 25; i++) {
+      await pp.waitForTimeout(60);
+      seen.add(await layout());
+    }
+    const v = await pp.locator('.td-tl [role="slider"]').getAttribute('aria-valuenow');
+    check(Number(v) > 3 && seen.size === 1 && !JSON.parse([...seen][0]).wide, `on a phone, playing the timeline (to version ${v}) doesn't move the page (${seen.size} layout${seen.size === 1 ? '' : 's'})`);
+    await phone.close();
+  }
 
   check(errors.length === 0, `no console or page errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
   console.log(`screenshots in ${shots}`);
