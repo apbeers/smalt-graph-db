@@ -10,6 +10,11 @@ Before changing the site, the README or how the product is described, read smalt
 `DECISIONS.md`. Copy the site theme (`docs/.vitepress/theme/{shiki.ts,smaltdb.css,smaltworks.ts,stage.ts}`) and the
 badges unchanged from the family. smaltcy has no mark or product colour yet (ADR 0001, "Open"): don't invent one.
 
+## Workflow
+
+Early development (owner, 2026-11-12): no pull requests. When work is done and `npm run check` passes, commit and push
+it straight to `main`. This replaces the family rule of one PR per task until the owner says otherwise.
+
 ## Commands
 
 | Command | What it does |
