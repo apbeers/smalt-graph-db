@@ -205,6 +205,26 @@ try {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: join(shots, 'demo-3d.png') });
 
+  // A small network: captions on, and a click shows a node's details.
+  await page.click('.td-seg button:has-text("2D")');
+  await page.selectOption('.td-field select >> nth=0', '50');
+  await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '58', null, { timeout: 60000 });
+  check(await page.isChecked('.td-check input'), 'a small network shows its captions');
+  await page.waitForTimeout(4000); // the layout settles
+  // Click outwards from the centre until a click lands on a node.
+  const box = await page.locator('.td-canvas').boundingBox();
+  let shown = false;
+  for (let ring = 0; ring < 8 && !shown; ring++) {
+    for (let k = 0; k < Math.max(1, ring * 6) && !shown; k++) {
+      const a = (k / Math.max(1, ring * 6)) * 2 * Math.PI;
+      await page.mouse.click(box.x + box.width / 2 + Math.cos(a) * ring * 18, box.y + box.height / 2 + Math.sin(a) * ring * 18);
+      shown = await page.waitForSelector('.td-details', { timeout: 400 }).then(() => true, () => false);
+    }
+  }
+  const title = shown ? await page.textContent('.td-details h4') : '';
+  check(shown && /\d+ connections?/.test((await page.textContent('.td-details')) ?? ''), `clicking a node shows its details (${title})`);
+  await page.screenshot({ path: join(shots, 'demo-small.png') });
+
   // On a phone, playing the demo's timeline must not move the page: its readout changes length every step, and a
   // grid column that grows with its content made the whole page shake.
   {

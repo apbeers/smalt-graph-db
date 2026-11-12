@@ -7,11 +7,12 @@ aside: false
 
 <div class="cy-demo-page">
 
-<h1 class="cy-demo-title">Tech demo: big graphs on the GPU</h1>
+<h1 class="cy-demo-title">Tech demo: graphs on the GPU, small and big</h1>
 
-<p class="cy-demo-lead">A generated social network of up to 100,000 people, drawn whole in 2D or 3D. Pick a size, search
-the drawing, or run a query: its result lights up inside the whole graph. The numbers show what each step took, on your
-machine. For queries with their results as tables, use the <a href="./playground">playground</a>.</p>
+<p class="cy-demo-lead">A generated social network of 50 to 100,000 people, drawn whole in 2D or 3D. Pick a small one to
+read every name and click a person for their details and connections, or a big one to see the engine and the renderer
+at scale. Search the drawing or run a query: its result lights up inside the whole graph. The numbers show what each
+step took, on your machine. For results as tables, use the <a href="./playground">playground</a>.</p>
 
 <ClientOnly>
   <TechDemo />

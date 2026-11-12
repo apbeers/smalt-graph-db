@@ -11,18 +11,36 @@ import { Scrubber, VersionedDrawing } from '../versioned-drawing'
 
 const { isDark } = useData()
 
-const SIZES = [10_000, 25_000, 50_000, 100_000]
-// 10,000 by default: it lays out quickly on most GPUs. The larger sizes are a click away.
+// Small sizes to read every node; large ones to see the engine and renderer work. 10,000 by default: it lays out
+// quickly on most GPUs.
+const SIZES = [50, 200, 1_000, 10_000, 25_000, 50_000, 100_000]
 const size = ref(10_000)
+/** Graphs this small show their captions unless the reader turns them off. */
+const LABELS_UP_TO = 1_000
 // 'history': a MemoryStore with the network's growth, a commit per person, and the timeline to scrub through it.
 const store = ref<'history' | 'memory' | 'csr'>('history')
 const mode = ref<'2d' | '3d'>('2d')
 const labels = ref(false)
+/** The reader set Labels themselves: stop following the size. */
+let labelsTouched = false
 const search = ref('')
 const busy = ref(false)
 const error = ref<string | null>(null)
 const gpuError = ref<string | null>(null)
 const highlightText = ref('')
+
+/** The node under the pointer, and the one clicked: its properties and connections, read from the engine. */
+const hover = ref<{ x: number; y: number; text: string } | null>(null)
+const pointer = { x: 0, y: 0 }
+interface Details {
+  id: number
+  labels: string[]
+  properties: Record<string, unknown>
+  city: string | null
+  connections: { type: string; out: boolean; name: string }[]
+  created: string | null
+}
+const details = ref<Details | null>(null)
 
 const nums = ref({ nodes: 0, rels: 0, loadMs: 0, transferMs: 0, drawMs: 0, fps: 0, tickMs: 0, layout: false, queryMs: 0, rows: 0 })
 
@@ -168,6 +186,7 @@ function doSearch(text: string) {
 }
 
 function clear() {
+  details.value = null
   search.value = ''
   highlightText.value = ''
   view?.highlight(null)
@@ -188,12 +207,59 @@ watch(isDark, (d) => {
   view?.setTheme(d ? 'dark' : 'light')
   timeline?.setTheme(d ? 'dark' : 'light')
 })
-watch([size, store], load)
+watch([size, store], () => {
+  details.value = null
+  if (!labelsTouched) labels.value = size.value <= LABELS_UP_TO
+  return load()
+})
+
+/** A node's details at the version shown, and its neighbours highlighted. */
+async function select(index: number | null) {
+  if (index === null || !client) {
+    details.value = null
+    return
+  }
+  const id = drawing.order[index]
+  if (id === undefined) return
+  const at = viewing.value < latest.value ? `AT VERSION ${viewing.value}\n` : ''
+  const r = await client.run(
+    `${at}MATCH (n) WHERE id(n) = $id
+     OPTIONAL MATCH (n)-[:LIVES_IN]->(c:City)
+     RETURN n, c.name AS city,
+       [(n)-[r]-(m) | {type: type(r), out: startNode(r) = n, name: coalesce(m.name, toString(id(m))), id: id(m)}] AS connections,
+       [h IN coalesce(history(n), []) WHERE h.change = 'created' | h.at][0] AS created`,
+    { id },
+  )
+  const row = r.rows[0]
+  if (!row) return
+  const n = row[0] as { labels: string[]; properties: Record<string, unknown> }
+  const connections = (row[2] as { type: string; out: boolean; name: string; id: number }[]).sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name))
+  details.value = { id, labels: [...n.labels], properties: n.properties, city: (row[1] as string | null) ?? null, connections, created: (row[3] as string | null) ?? null }
+  const near = [index, ...connections.map((c) => indexOf.get(c.id)).filter((i): i is number => i !== undefined)]
+  view?.highlight(near)
+  highlightText.value = `${String(n.properties.name ?? id)} and ${connections.length} connection${connections.length === 1 ? '' : 's'}`
+}
+
+function onPointer(e: PointerEvent) {
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  pointer.x = e.clientX - box.left
+  pointer.y = e.clientY - box.top
+  if (hover.value) hover.value = { ...hover.value, x: pointer.x, y: pointer.y }
+}
+
+const fmt = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
 
 onMounted(async () => {
   client = connect(new Worker(new URL('../../../../src/worker/worker.ts', import.meta.url), { type: 'module', name: 'smaltcy' }))
   try {
     view = await createGraphView(canvas.value!, { mode: mode.value, theme: isDark.value ? 'dark' : 'light', labels: labels.value })
+    view.onHover((hit) => {
+      if (!hit || hit.kind !== 'node') return void (hover.value = null)
+      const id = drawing.order[hit.index]
+      const n = id === undefined ? undefined : drawing.nodes.get(id)
+      hover.value = n ? { x: pointer.x, y: pointer.y, text: n.caption } : null
+    })
+    view.onClick((hit) => void select(hit?.kind === 'node' ? hit.index : null))
   } catch (e) {
     gpuError.value = e instanceof GpuUnavailableError ? 'This demo draws with WebGPU, which this browser doesn\'t offer. The queries still run.' : `The graph view couldn't start: ${(e as Error).message}`
   }
@@ -238,7 +304,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
         <button :class="{ on: mode === '2d' }" @click="mode = '2d'">2D</button>
         <button :class="{ on: mode === '3d' }" @click="mode = '3d'">3D</button>
       </div>
-      <label class="td-check"><input v-model="labels" type="checkbox" /> Labels</label>
+      <label class="td-check"><input v-model="labels" type="checkbox" @change="labelsTouched = true" /> Labels</label>
       <button class="td-ghost" @click="view?.layout.reheat()">Re-run layout</button>
       <button class="td-ghost" @click="clear">Clear highlight</button>
     </div>
@@ -256,8 +322,9 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
     </div>
 
     <div class="td-main">
-      <section class="td-view">
+      <section class="td-view" @pointermove="onPointer" @pointerleave="hover = null">
         <canvas ref="canvas" class="td-canvas" />
+        <div v-if="hover" class="td-tip" :style="{ left: hover.x + 14 + 'px', top: hover.y + 14 + 'px' }">{{ hover.text }}</div>
         <div v-if="gpuError" class="td-gpu">{{ gpuError }}</div>
         <div v-if="highlightText" class="td-highlight">{{ highlightText }}</div>
         <GraphControls v-if="!gpuError" :mode="mode" />
@@ -270,6 +337,27 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
         <div ref="tlHost" />
       </div>
       <aside class="td-side">
+        <section v-if="details" class="td-details" aria-live="polite">
+          <header>
+            <h4>{{ details.properties.name ?? `Node ${details.id}` }}</h4>
+            <button class="td-ghost td-close" aria-label="Close the details" @click="clear">×</button>
+          </header>
+          <p class="td-labels">
+            <span v-for="l in details.labels" :key="l" class="td-label">:{{ l }}</span>
+            <span class="td-id">id {{ details.id }}</span>
+          </p>
+          <dl>
+            <template v-for="(v, k) in details.properties" :key="k"><dt>{{ k }}</dt><dd>{{ fmt(v) }}</dd></template>
+            <template v-if="details.city"><dt>lives in</dt><dd>{{ details.city }}</dd></template>
+            <template v-if="details.created"><dt>joined</dt><dd>{{ details.created.slice(0, 16).replace('T', ' ') }}</dd></template>
+          </dl>
+          <p class="td-eyebrow">{{ details.connections.length }} connection{{ details.connections.length === 1 ? '' : 's' }}</p>
+          <ul class="td-conn">
+            <li v-for="(c, i) in details.connections.slice(0, 40)" :key="i"><code>{{ c.out ? '→' : '←' }} {{ c.type }}</code> {{ c.name }}</li>
+            <li v-if="details.connections.length > 40" class="td-more">and {{ details.connections.length - 40 }} more</li>
+          </ul>
+        </section>
+        <p v-else-if="size <= LABELS_UP_TO" class="td-note">Click a person or a city to see its properties and connections.</p>
         <label class="td-field">
           <span class="td-eyebrow">Search the drawing (on the GPU's captions)</span>
           <input v-model="search" type="search" placeholder="A name or a city" />
@@ -313,6 +401,21 @@ select:focus-visible, input:focus-visible, button:focus-visible, textarea:focus-
 .td-nums span { font-size: 12px; color: var(--vp-c-text-2); }
 .td-main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: 1fr auto; gap: 12px; height: calc(100vh - var(--vp-nav-height) - 240px); min-height: 560px; }
 .td-view { grid-column: 1; grid-row: 1; }
+.td-tip { position: absolute; pointer-events: none; padding: 4px 8px; border-radius: 6px; background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); font-size: 13px; white-space: nowrap; box-shadow: var(--vp-shadow-2); }
+.td-details { padding: 12px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); }
+.td-details header { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
+.td-details h4 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.td-close { height: 28px; width: 28px; padding: 0; font-size: 18px; line-height: 1; }
+.td-labels { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 8px; }
+.td-label { font-family: var(--vp-font-family-mono); font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--vp-c-default-soft); }
+.td-id { font-size: 12px; color: var(--vp-c-text-3); }
+.td-details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0 0 10px; font-size: 13px; }
+.td-details dt { font-family: var(--vp-font-family-mono); color: var(--vp-c-text-2); }
+.td-details dd { margin: 0; font-family: var(--vp-font-family-mono); overflow-wrap: anywhere; }
+.td-conn { list-style: none; margin: 4px 0 0; padding: 0; max-height: 220px; overflow: auto; font-size: 13px; }
+.td-conn li { padding: 2px 0; }
+.td-conn code { font-size: 12px; color: var(--vp-c-text-2); }
+.td-more { color: var(--vp-c-text-3); }
 .td-side { grid-column: 2; grid-row: 1 / span 2; }
 .td-tl { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 6px; }
 .td-tl-note { margin: 0; font-size: 13px; color: var(--vp-c-text-2); }
