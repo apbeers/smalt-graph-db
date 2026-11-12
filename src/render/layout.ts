@@ -43,6 +43,9 @@ export function repulsionTiles(n: number): { total: number; tiles: number; scale
   return { total, tiles: SAMPLED_TILES, scale: total / SAMPLED_TILES };
 }
 
+/** The most a tick scales the positions by when the spread changes (in log terms): ×1.06. */
+export const MAX_RESCALE = 0.06;
+
 export class GpuLayout {
   readonly settings: LayoutSettings = { ...DEFAULT_LAYOUT };
   /**
@@ -50,6 +53,8 @@ export class GpuLayout {
    * (springs, repulsion, the linear gravity) scales alike and the layout at rest grows by `spread`.
    */
   spread = 1;
+  /** The spread the positions are drawn at: ticks scale them towards `spread` (MAX_RESCALE a tick). */
+  appliedSpread = 1;
   /** Current positions (read by the renderer). vec4 per node. */
   readonly pos: GrowableBuffer;
   private readonly next: GrowableBuffer;
@@ -323,7 +328,7 @@ export class GpuLayout {
   }
 
   get running(): boolean {
-    return this.alpha >= this.settings.alphaMin || this.alphaTarget > 0;
+    return this.alpha >= this.settings.alphaMin || this.alphaTarget > 0 || this.appliedSpread !== this.spread;
   }
 
   /** Encode and submit one tick at the current alpha, then cool. */
@@ -356,7 +361,20 @@ export class GpuLayout {
     u[3] = rep.total;
     u[4] = this.dims;
     f[8] = this.alpha;
-    const k = this.spread;
+    // Scale the drawing towards a new spread, at most MAX_RESCALE a tick; the forces take the scale
+    // the drawing is at, so that they never fling nodes towards a size it has not reached yet.
+    let r = 1;
+    if (this.appliedSpread !== this.spread) {
+      const d = Math.log(this.spread / this.appliedSpread);
+      if (Math.abs(d) <= MAX_RESCALE) {
+        r = this.spread / this.appliedSpread;
+        this.appliedSpread = this.spread;
+      } else {
+        r = Math.exp(Math.sign(d) * MAX_RESCALE);
+        this.appliedSpread *= r;
+      }
+    }
+    const k = this.appliedSpread;
     f[9] = s.charge * k * k;
     f[10] = rep.scale;
     f[11] = k * k; // distanceMin² (d3 distanceMin = 1, scaled)
@@ -365,6 +383,7 @@ export class GpuLayout {
     f[14] = s.gravity;
     f[15] = s.decay;
     f[16] = 200 * k;
+    f[17] = r;
     this.device.queue.writeBuffer(this.params, 0, this.paramData);
 
     const q = this.query && !this.query.busy && this.ticks % 10 === 0 ? this.query : null;

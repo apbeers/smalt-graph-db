@@ -41,6 +41,11 @@ export interface SetGraphOptions {
 }
 
 export type ViewMode = '2d' | '3d';
+/**
+ * `'force'`: the force-directed layout (physics on the GPU). `'fixed'`: no physics; every node in a
+ * slot of its group's cluster, spread out so each one can be seen.
+ */
+export type LayoutMode = 'force' | 'fixed';
 export type Theme = 'light' | 'dark';
 
 export interface GraphViewOptions {
@@ -53,6 +58,10 @@ export interface GraphViewOptions {
   background?: 'transparent' | 'theme';
   /** Ticks the layout takes to cool to rest (default 300): fewer settles sooner and less evenly. */
   layoutTicks?: number;
+  /** `'force'` (default) or `'fixed'`. */
+  layoutMode?: LayoutMode;
+  /** How far apart nodes are, as a factor of the normal layout (default 1, clamped to 0.2..5). */
+  spread?: number;
 }
 
 export interface Hit {
@@ -61,9 +70,12 @@ export interface Hit {
 }
 
 export interface LayoutControl {
+  /** Run the forces (force mode; nothing to run in fixed mode). */
   start(): void;
   stop(): void;
+  /** The forces are running, or (fixed mode) nodes are easing to their slots. */
   readonly running: boolean;
+  /** Restart the forces from full heat; in fixed mode, lay the graph out afresh. */
   reheat(): void;
 }
 
@@ -81,6 +93,20 @@ export interface GraphView {
   setMode(mode: ViewMode): void;
   setTheme(theme: Theme): void;
   setLabels(on: boolean): void;
+  /**
+   * `'fixed'` eases every node to a slot of its group's cluster and stops the physics (dragging a
+   * node then moves only that node); `'force'` resumes the physics from where the nodes are.
+   */
+  setLayoutMode(mode: LayoutMode): void;
+  readonly layoutMode: LayoutMode;
+  /**
+   * Move the nodes closer together (< 1) or farther apart (> 1), clamped to 0.2..5. Fixed: around the
+   * layout's centre, eased; force: the layout's link distance and repulsion scale, and it settles to
+   * the new size. Cheap enough to call on every frame of a slider drag. It holds the camera (as a pan
+   * or zoom does) so the nodes visibly move apart; `fit()` frames them again.
+   */
+  setSpread(spread: number): void;
+  readonly spread: number;
   /** Highlighted nodes and their incident edges are drawn at full strength, the rest dimmed; null clears. */
   highlight(indices: number[] | null): void;
   /** Case-insensitive match on label, id and group; highlights and returns the matching indices. */

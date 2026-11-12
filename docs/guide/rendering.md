@@ -35,6 +35,8 @@ try {
 | --- | --- |
 | `setMode('2d' \| '3d')` | Switches between the flat and the 3D view, keeping the layout |
 | `setTheme('light' \| 'dark')` | Kiln colours for the page's theme |
+| `setLayoutMode('force' \| 'fixed')` | Force: nodes pull on their neighbours and push the rest away. Fixed: nodes locked in place, spread out in a cluster per group, highest-degree at the centre; nothing overlaps, and a node you drag stays where you drop it |
+| `setSpread(factor)` | Moves every node closer together (below 1) or farther apart (above 1), from 0.2 to 5, eased; holds the camera so the nodes visibly move |
 | `setLabels(on)` | Captions on or off (hovered and highlighted nodes always show theirs) |
 | `search(text)` | Highlights nodes whose caption, id or group contains the text; returns their indexes |
 | `highlight(indexes \| null)` | Highlights nodes and their relationships, and dims the rest |
@@ -64,6 +66,10 @@ One compute pass per tick, one GPU thread per node: every node repels every othe
 memory; sampled above 20,480 nodes), relationships pull their ends together, and gravity holds the graph to the
 centre. The layout cools and stops by itself, and the view draws only when something changes, so a settled graph
 costs no GPU time.
+
+In fixed mode the layout is computed on the CPU (about 25 ms for 100,000 nodes) and doesn't move: while a timeline
+scrubs, nodes that stay keep their place and new ones take a free place in their group's cluster. `layoutMode` and
+`spread` can also be set when the view is made: `createGraphView(canvas, { layoutMode: 'fixed', spread: 1.5 })`.
 
 The `layoutTicks` option sets how many ticks the layout takes to cool (default 300). Fewer settle sooner and less
 evenly: `createGraphView(canvas, { layoutTicks: 100 })`.

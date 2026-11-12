@@ -175,7 +175,11 @@ export function enableRunnable(base: string, doc: Document = document): void {
     const canvas = doc.createElement('canvas')
     const bar = doc.createElement('div')
     bar.className = 'cy-run-graph-bar'
-    bar.innerHTML = `<button type="button" data-mode="2d" class="on">2D</button><button type="button" data-mode="3d">3D</button><button type="button" data-fit>Fit</button><span></span>`
+    bar.innerHTML =
+      `<button type="button" data-mode="2d" class="on">2D</button><button type="button" data-mode="3d">3D</button>` +
+      `<button type="button" data-layout="force" class="on" title="Physics">Force</button><button type="button" data-layout="fixed" title="Locked, spread out by group">Fixed</button>` +
+      `<input type="range" data-spread min="-100" max="100" value="0" aria-label="Spread: how far apart the nodes are" title="Spread">` +
+      `<button type="button" data-fit>Fit</button><span></span>`
     const hint = doc.createElement('div')
     hint.className = 'cy-run-hint'
     const setHint = (mode: '2d' | '3d') => {
@@ -198,10 +202,20 @@ export function enableRunnable(base: string, doc: Document = document): void {
       view.setGraph(toRender(drawn))
       const info = bar.querySelector('span')!
       info.textContent = `${drawn.nodes.length} nodes · ${drawn.edges.length} relationships`
+      // Spread: logarithmic, 1× in the middle, 0.2× to 5×.
+      bar.querySelector<HTMLInputElement>('[data-spread]')!.addEventListener('input', (e) => {
+        view.setSpread(Math.exp((Number((e.target as HTMLInputElement).value) / 100) * Math.log(5)))
+      })
       bar.addEventListener('click', (e) => {
         const b = (e.target as Element).closest('button')
         if (!b) return
         if (b.hasAttribute('data-fit')) return view.fit()
+        const layout = b.getAttribute('data-layout') as 'force' | 'fixed' | null
+        if (layout) {
+          view.setLayoutMode(layout)
+          bar.querySelectorAll('[data-layout]').forEach((x) => x.classList.toggle('on', x === b))
+          return
+        }
         const mode = b.getAttribute('data-mode') as '2d' | '3d'
         view.setMode(mode)
         setHint(mode)

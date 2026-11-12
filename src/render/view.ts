@@ -16,6 +16,7 @@ import { nextCapacity } from './growth.js';
 import { InputController } from './input.js';
 import type { InputHost } from './input.js';
 import { ALL_LABELS_BELOW, GlyphAtlas, LABEL_CAP, MAX_LABEL_CHARS, buildGlyphInstances, chooseLabels, shouldShowAll } from './labels.js';
+import { FixedLayout } from './fixed.js';
 import { GpuLayout, decayForTicks } from './layout.js';
 import { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT, GroupColors, THEMES, packRgba8, parseColor } from './palette.js';
 import type { Rgba } from './palette.js';
@@ -26,7 +27,8 @@ import { matchNodes } from './search.js';
 import { DRAW_WGSL } from './shaders/draw.wgsl.js';
 import { ANIM_EXIT, ENTER_MS, EXIT_MS, FLASH_MS, Transitions } from './transition.js';
 import type {
-  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, RenderEdge, RenderGraph, RenderNode, SetGraphOptions, Theme, ViewMode,
+  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, LayoutMode, RenderEdge, RenderGraph, RenderNode, SetGraphOptions, Theme,
+  ViewMode,
 } from './types.js';
 
 /** World radius of a node of size 1. */
@@ -35,6 +37,18 @@ const DEPTH_FORMAT: GPUTextureFormat = 'depth24plus';
 const MIRROR_EVERY_TICKS = 12;
 const LABEL_THROTTLE_MS = 120;
 const ANIM_MS = 450;
+/** Into the fixed layout, or a recomputed one. */
+const FIXED_SWITCH_MS = 400;
+/** A spread change in the fixed layout (retargeted while a slider moves). */
+const SPREAD_MS = 200;
+export const MIN_SPREAD = 0.2;
+export const MAX_SPREAD = 5;
+
+const easeOut = (t: number) => 1 - (1 - t) ** 3;
+
+export function clampSpread(s: number): number {
+  return Number.isFinite(s) ? Math.min(MAX_SPREAD, Math.max(MIN_SPREAD, s)) : 1;
+}
 /** Bytes of the frame uniform (struct Frame in draw.wgsl.ts). */
 const FRAME_BYTES = 288;
 
@@ -43,6 +57,13 @@ interface Pipelines {
   node: GPURenderPipeline;
   edge: GPURenderPipeline;
   label?: GPURenderPipeline;
+}
+
+/** The fixed layout easing from where nodes were to their slots (in the layout's tween shader). */
+interface Tween {
+  t0: number;
+  ms: number;
+  ease: (t: number) => number;
 }
 
 interface Anim {
@@ -120,6 +141,12 @@ export class GraphViewImpl implements GraphView {
   private edgeData = new Uint32Array(64 * 4);
   private edgeF32 = new Float32Array(this.edgeData.buffer);
 
+  // Layout mode and spread.
+  private lm: LayoutMode;
+  private sp: number;
+  private readonly fixed = new FixedLayout();
+  private tween: Tween | null = null;
+
   // View.
   private mode: ViewMode;
   private theme: Theme;
@@ -174,11 +201,14 @@ export class GraphViewImpl implements GraphView {
     this.labelsOn = opts.labels ?? true;
     this.customPalette = opts.palette && opts.palette.length > 0 ? [...opts.palette] : null;
     this.background = opts.background ?? 'transparent';
+    this.lm = opts.layoutMode === 'fixed' ? 'fixed' : 'force';
+    this.sp = opts.spread === undefined ? 1 : clampSpread(opts.spread);
     const device = this.device;
 
     this.lay = new GpuLayout(device, gpu.timestamps);
     if (opts.layoutTicks !== undefined) this.lay.settings.alphaDecay = decayForTicks(opts.layoutTicks);
     this.lay.dims = this.mode === '2d' ? 2 : 3;
+    this.lay.spread = this.sp;
     const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
     this.styleBuf = new GrowableBuffer(device, 'render.styles', S, 16);
     this.edgeBuf = new GrowableBuffer(device, 'render.edges', S, 16);
@@ -262,6 +292,7 @@ export class GraphViewImpl implements GraphView {
     const self = this;
     this.layout = {
       start() {
+        if (self.lm === 'fixed') return;
         self.layoutActive = true;
         if (self.lay.alpha < self.lay.settings.alphaMin) self.lay.alpha = 0.3;
         self.requestFrame();
@@ -270,9 +301,14 @@ export class GraphViewImpl implements GraphView {
         self.layoutActive = false;
       },
       get running() {
+        if (self.lm === 'fixed') return self.n > 0 && self.tween !== null;
         return self.n > 0 && (self.switching || (self.layoutActive && self.lay.running));
       },
       reheat() {
+        if (self.lm === 'fixed') {
+          self.recomputeFixed(FIXED_SWITCH_MS);
+          return;
+        }
         self.freeLayout();
         self.lay.alpha = 1;
         self.layoutActive = true;
@@ -339,9 +375,27 @@ export class GraphViewImpl implements GraphView {
     const cap = nextCapacity(count, 0);
     const out = { pos: new Float32Array(cap * 4), src: new Uint32Array(cap), offset: new Float32Array(cap * 4) };
     let kept = 0;
-    if (keep) {
+    let fixedMoved = false;
+    if (this.lm === 'fixed') {
+      // Fixed: every node at its slot. Kept nodes start from where they are drawn (a spread or a
+      // move in flight carries on from there); new ones at their slot.
+      if (keep) fixedMoved = this.fixed.update(nodes, this.csr, diff.src, this.mode);
+      else this.fixed.compute(nodes, this.csr, this.mode);
+      this.fixed.targets(this.sp, out.pos);
+      for (let i = 0; i < n; i++) {
+        const s = diff.src[i]!;
+        const o = i * 4;
+        if (keep && s < oldN) {
+          out.src[i] = s;
+          out.offset[o] = out.offset[o + 1] = out.offset[o + 2] = out.offset[o + 3] = 0;
+        } else {
+          out.src[i] = NONE;
+          out.offset.set(out.pos.subarray(o, o + 4), o);
+        }
+      }
+    } else if (keep) {
       for (let i = 0; i < n; i++) if (diff.src[i] !== NONE) kept++;
-      placeNodes(n, this.csr, diff.src, oldPos, this.mode, this.lay.settings.linkDistance, kept, out);
+      placeNodes(n, this.csr, diff.src, oldPos, this.mode, this.lay.settings.linkDistance * this.sp, kept, out);
     } else {
       for (let i = 0; i < n; i++) {
         seedPosition(i, this.mode, out.pos, i * 4);
@@ -362,7 +416,23 @@ export class GraphViewImpl implements GraphView {
     if (hadSlots && (keep || G > 0)) this.lay.regraph(n, count, out.src, out.offset, this.csr);
     else this.lay.setGraph(n, out.pos, this.csr, count);
 
-    if (keep) {
+    if (this.lm === 'fixed') {
+      this.mob = null;
+      this.lay.setMobility(null);
+      this.lay.alpha = 0;
+      this.layoutActive = false;
+      this.lay.setFixedBase(this.fixed.base, n);
+      if (keep && (fixedMoved || this.tween)) {
+        // Carry on from the drawn positions: a move of whole clusters in full, a spread change in
+        // flight for the time it had left.
+        const left = this.tween ? this.tween.t0 + this.tween.ms - performance.now() : 0;
+        this.lay.tweenFrom();
+        this.tween = fixedMoved
+          ? { t0: performance.now(), ms: Math.max(left, FIXED_SWITCH_MS), ease: easeInOut }
+          : { t0: performance.now(), ms: Math.max(left, 16), ease: easeOut };
+      } else this.tween = null;
+      if (keep && this.autoFit) this.animateTo(this.fitState(this.anim ? this.anim.to : this.cam), 300);
+    } else if (keep) {
       // Reheat by how much changed, and after a small change let mainly the nodes near it move, so
       // that a step of one or two nodes barely moves the rest of the drawing.
       const changes = diff.added + diff.removed + 0.5 * (diff.edgesAdded + diff.edgesRemoved);
@@ -405,6 +475,7 @@ export class GraphViewImpl implements GraphView {
       this.mob = null;
       this.lay.setMobility(null);
       this.lay.alpha = 1;
+      this.lay.appliedSpread = this.sp;
       this.layoutActive = n > 0;
     }
 
@@ -467,6 +538,12 @@ export class GraphViewImpl implements GraphView {
     this.anim = null;
     this.cam = convertCamera(this.cam, mode, Math.max(this.height, 1));
     if (mode === '3d') this.animateTo({ ...this.cam, yaw: 0.55, pitch: -0.3 }, 700);
+    if (this.lm === 'fixed') {
+      this.gen++;
+      this.recomputeFixed(FIXED_SWITCH_MS + 100);
+      this.invalidate(true);
+      return;
+    }
     this.switching = true;
     const gen = this.gen;
     void this.refreshMirror().then(() => {
@@ -483,6 +560,61 @@ export class GraphViewImpl implements GraphView {
       this.invalidate(true);
     });
     this.invalidate(true);
+  }
+
+  get layoutMode(): LayoutMode {
+    return this.lm;
+  }
+
+  get spread(): number {
+    return this.sp;
+  }
+
+  setLayoutMode(mode: LayoutMode): void {
+    if (this.destroyed || (mode !== 'fixed' && mode !== 'force') || mode === this.lm) return;
+    this.lm = mode;
+    // Reads in flight (and a 2D/3D switch waiting on one) belong to the other mode.
+    this.gen++;
+    this.switching = false;
+    if (this.drag) this.dragEnd();
+    if (mode === 'fixed') {
+      this.layoutActive = false;
+      this.lay.alpha = 0;
+      this.lay.alphaTarget = 0;
+      this.recomputeFixed(FIXED_SWITCH_MS);
+    } else {
+      // Physics from where the nodes are now, gently.
+      this.tween = null;
+      this.lay.appliedSpread = this.sp;
+      this.lay.resetVelocities();
+      this.freeLayout();
+      this.lay.alpha = Math.max(this.lay.alpha, 0.3);
+      this.layoutActive = this.n > 0;
+      this.invalidate(true);
+    }
+  }
+
+  setSpread(spread: number): void {
+    const s = clampSpread(spread);
+    if (this.destroyed || s === this.sp) return;
+    this.sp = s;
+    this.lay.spread = s;
+    // Spreading is the reader moving things themselves: hold the camera so the nodes visibly move apart (fit() frames
+    // them again), as a pan or zoom does.
+    this.autoFit = false;
+    if (this.n === 0 || this.lm === 'fixed') this.lay.appliedSpread = s;
+    if (this.n === 0) return;
+    if (this.lm === 'fixed') {
+      // Retarget from where the nodes are drawn: a slider dragged every frame never queues.
+      this.startTween(SPREAD_MS, easeOut);
+    } else {
+      // Link distance and charge scale with the spread; reheat gently so the drawing grows or
+      // shrinks smoothly to its new rest.
+      this.freeLayout();
+      this.lay.alpha = Math.max(this.lay.alpha, 0.3);
+      this.layoutActive = true;
+      this.requestFrame();
+    }
   }
 
   setTheme(theme: Theme): void {
@@ -713,10 +845,12 @@ export class GraphViewImpl implements GraphView {
     this.drag = { node, depth: p.depth, dx: p.x - x, dy: p.y - y };
     this.anim = null;
     this.autoFit = false;
-    this.lay.setPinned(node, true);
-    this.freeLayout();
-    this.lay.alphaTarget = 0.3;
-    this.layoutActive = true;
+    if (this.lm === 'force') {
+      this.lay.setPinned(node, true);
+      this.freeLayout();
+      this.lay.alphaTarget = 0.3;
+      this.layoutActive = true;
+    }
     this.setHover({ kind: 'node', index: node });
     this.requestFrame();
   }
@@ -732,6 +866,12 @@ export class GraphViewImpl implements GraphView {
     this.mirror[o + 1] = w[1];
     this.mirror[o + 2] = w[2];
     this.lay.setNodePosition(d.node, w[0], w[1], w[2]);
+    if (this.lm === 'fixed') {
+      // Only this node moves, and it stays where it is dropped (at any spread).
+      this.fixed.moveNode(d.node, w[0], w[1], w[2], this.sp);
+      this.lay.setFixedBaseAt(d.node, this.fixed.base.subarray(o, o + 4));
+      this.bounds = boundsOf(this.mirror, this.n);
+    }
     this.invalidate(false);
   }
 
@@ -745,6 +885,37 @@ export class GraphViewImpl implements GraphView {
   }
 
   // ---- internals ------------------------------------------------------------------------------
+
+  /** Lay the whole graph out afresh in the fixed layout and ease the nodes to it. */
+  private recomputeFixed(ms: number): void {
+    if (this.n === 0) return;
+    this.fixed.compute(this.nodes, this.csr, this.mode);
+    this.lay.setFixedBase(this.fixed.base, this.n);
+    this.startTween(ms, easeInOut);
+  }
+
+  /** Ease from the drawn positions to the fixed slots at the current spread. */
+  private startTween(ms: number, ease: (t: number) => number): void {
+    this.lay.tweenFrom();
+    this.tween = { t0: performance.now(), ms, ease };
+    this.fixedMirror(ms);
+    this.requestFrame();
+  }
+
+  /** The mirror holds the fixed slots: the CPU knows them, no read-back needed. */
+  private fixedMirror(fitMs: number): void {
+    const n = this.n;
+    if (this.mirror.length < n * 4) {
+      const m = new Float32Array(nextCapacity(n, 0) * 4);
+      m.set(this.mirror.subarray(0, Math.min(this.mirror.length, m.length)));
+      this.mirror = m;
+    }
+    this.fixed.targets(this.sp, this.mirror);
+    this.bounds = boundsOf(this.mirror, n);
+    if (this.autoFit) this.animateTo(this.fitState(this.anim ? this.anim.to : this.cam), fitMs);
+    this.labelsDirty = true;
+    this.needsDraw = true;
+  }
 
   /** Every node takes the full layout force again. */
   private freeLayout(): void {
@@ -884,6 +1055,18 @@ export class GraphViewImpl implements GraphView {
         this.layoutActive = false;
         void this.refreshMirror();
       }
+    }
+
+    // The fixed layout easing to its slots.
+    if (this.tween && this.lm === 'fixed') {
+      const tw = this.tween;
+      const t = Math.min(1, Math.max(0, (now - tw.t0) / tw.ms));
+      this.lay.tweenStep(t >= 1 ? 1 : tw.ease(t), this.sp, this.fixed.pivot);
+      this.needsDraw = true;
+      if (t >= 1) {
+        this.tween = null;
+        this.fixedMirror(300);
+      } else again = true;
     }
 
     // Transitions run in the shaders from per-element start times; the loop only keeps drawing

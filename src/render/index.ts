@@ -7,7 +7,7 @@ import type { GraphView, GraphViewOptions } from './types.js';
 import { GraphViewImpl } from './view.js';
 
 export type {
-  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, RenderEdge, RenderGraph, RenderNode, SetGraphOptions, Theme, ViewMode,
+  GraphView, GraphViewOptions, GraphViewStats, Hit, LayoutControl, LayoutMode, RenderEdge, RenderGraph, RenderNode, SetGraphOptions, Theme, ViewMode,
 } from './types.js';
 export { GpuUnavailableError, isWebGpuAvailable } from './gpu.js';
 export { FAMILY_PALETTE_DARK, FAMILY_PALETTE_LIGHT } from './palette.js';

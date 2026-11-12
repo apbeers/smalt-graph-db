@@ -232,6 +232,16 @@ try {
   check(shown && /\d+ connections?/.test((await page.textContent('.td-details')) ?? ''), `clicking a node shows its details (${title})`);
   await page.screenshot({ path: join(shots, 'demo-small.png') });
 
+  // Fixed layout and the spread slider.
+  await page.click('.lc-seg button:has-text("Fixed")');
+  check((await page.getAttribute('.lc-seg button:has-text("Fixed")', 'aria-pressed')) === 'true', 'the demo switches to the fixed layout');
+  await page.locator('.lc-spread input').fill('100');
+  check((await page.textContent('.lc-spread output')) === '5.0×', `the spread slider goes to 5× (${await page.textContent('.lc-spread output')})`);
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: join(shots, 'demo-fixed-spread.png') });
+  await page.locator('.lc-spread input').fill('0');
+  await page.click('.lc-seg button:has-text("Force")');
+
   // On a phone, playing the demo's timeline must not move the page: its readout changes length every step, and a
   // grid column that grows with its content made the whole page shake.
   {

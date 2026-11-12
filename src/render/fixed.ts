@@ -7,7 +7,8 @@
  *   `spacing` apart.
  * - Clusters, largest first, are placed one by one along golden-angle rays as close to the centre as
  *   they fit without overlapping the clusters already placed (a sunflower of cluster centres sized by
- *   radius); past MAX_GREEDY clusters the rest go on rings (shells in 3D) around them.
+ *   radius); past MAX_GREEDY clusters the rest go on rings around them. In 3D too the centres lie in
+ *   the screen's plane (z = 0), so that the clusters stand side by side in the default view.
  * - While the graph changes (`update`), nodes that stay keep their slot, new nodes take the innermost
  *   free slot of their group's cluster, removed nodes leave a hole. A cluster reserves a little more
  *   room than it needs; when it outgrows that, its room grows by half and the clusters are placed
@@ -93,27 +94,11 @@ export function clusterExtent(cap: number, mode: ViewMode): number {
 
 // ---- placing clusters ---------------------------------------------------------------------------
 
-/** Unit direction of ray j (independent of how many there are, so earlier clusters stay put). */
-function rayDir(j: number, mode: ViewMode, out: number[]): void {
-  const a = j * GOLDEN;
-  if (mode === '2d') {
-    out[0] = Math.cos(a);
-    out[1] = Math.sin(a);
-    out[2] = 0;
-    return;
-  }
-  const y = 1 - 2 * ((j * Math.SQRT2 + 0.5) % 1);
-  const r = Math.sqrt(Math.max(0, 1 - y * y));
-  out[0] = r * Math.cos(a);
-  out[1] = y;
-  out[2] = r * Math.sin(a);
-}
-
 /**
- * Centres for circles (2D) or balls (3D) of the given radii, in the order given (place the largest
- * first), so that any two are at least `gap` apart. Returns xyz per cluster.
+ * Centres in the plane (z = 0) for circles or balls of the given radii, in the order given (place
+ * the largest first), so that any two are at least `gap` apart. Returns xyz per cluster.
  */
-export function packClusters(radii: ArrayLike<number>, mode: ViewMode, gap: number): Float64Array {
+export function packClusters(radii: ArrayLike<number>, gap: number): Float64Array {
   const G = radii.length;
   const c = new Float64Array(G * 3);
   if (G === 0) return c;
@@ -121,9 +106,12 @@ export function packClusters(radii: ArrayLike<number>, mode: ViewMode, gap: numb
   const u = [0, 0, 0];
   let outer = radii[0]!;
   for (let j = 1; j < greedy; j++) {
-    // Along ray j, the distances at which this cluster would overlap cluster i form an interval;
-    // take the smallest distance outside all of them.
-    rayDir(j, mode, u);
+    // Ray j's direction does not depend on how many clusters there are, so earlier ones stay put;
+    // the first points left, so that a few clusters lie side by side on a wide screen. Along it, the
+    // distances at which this cluster would overlap cluster i form an interval: take the smallest
+    // distance outside all of them.
+    u[0] = Math.cos(Math.PI + (j - 1) * GOLDEN);
+    u[1] = Math.sin(Math.PI + (j - 1) * GOLDEN);
     const rj = radii[j]!;
     const iv: [number, number][] = [];
     for (let i = 0; i < j; i++) {
@@ -148,32 +136,19 @@ export function packClusters(radii: ArrayLike<number>, mode: ViewMode, gap: numb
     c[j * 3 + 2] = u[2]! * rho;
     outer = Math.max(outer, rho + rj);
   }
-  // The rest on rings (shells) outside, each ring sized for its first (largest) cluster.
+  // The rest on rings outside, each ring sized for its first (largest) cluster.
   let j = greedy;
   let ring = 0;
   while (j < G) {
     const rmax = radii[j]!;
     const rho = outer + gap + rmax;
     const half = rmax + gap / 2;
-    let slots: number;
-    if (mode === '2d') slots = Math.max(1, Math.floor(Math.PI / Math.asin(Math.min(1, half / rho))));
-    else slots = Math.max(1, Math.floor(((FIB_MIN_CHORD * rho) / (2 * half)) ** 2));
+    const slots = Math.max(1, Math.floor(Math.PI / Math.asin(Math.min(1, half / rho))));
     const count = Math.min(slots, G - j);
     for (let k = 0; k < count; k++, j++) {
-      if (mode === '2d') {
-        const a = ring * GOLDEN + (2 * Math.PI * k) / count;
-        c[j * 3] = rho * Math.cos(a);
-        c[j * 3 + 1] = rho * Math.sin(a);
-      } else if (count === 1) {
-        c[j * 3 + 1] = rho;
-      } else {
-        const y = 1 - (2 * k + 1) / count;
-        const r = Math.sqrt(Math.max(0, 1 - y * y));
-        const a = k * GOLDEN + ring;
-        c[j * 3] = rho * r * Math.cos(a);
-        c[j * 3 + 1] = rho * y;
-        c[j * 3 + 2] = rho * r * Math.sin(a);
-      }
+      const a = ring * GOLDEN + (2 * Math.PI * k) / count;
+      c[j * 3] = rho * Math.cos(a);
+      c[j * 3 + 1] = rho * Math.sin(a);
     }
     outer = rho + rmax;
     ring++;
@@ -412,7 +387,7 @@ export class FixedLayout {
     const order = this.clusters.slice().sort((a, b) => b.cap - a.cap || a.seq - b.seq);
     // Each cluster's radius includes half a spacing, so nodes of two clusters are a full gap apart.
     const radii = order.map((c) => this.radius(c) + this.spacing / 2);
-    const c = packClusters(radii, this.mode, this.spacing * CLUSTER_GAP);
+    const c = packClusters(radii, this.spacing * CLUSTER_GAP);
     order.forEach((cl, j) => {
       cl.x = c[j * 3]!;
       cl.y = c[j * 3 + 1]!;

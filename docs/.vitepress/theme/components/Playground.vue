@@ -7,6 +7,7 @@ import type { DatasetRequest } from '../../../../src/worker/protocol'
 import { createGraphView, GpuUnavailableError, type GraphView, type RenderGraph } from '../../../../src/render/index'
 import { EXAMPLES, type DatasetKey } from './examples'
 import GraphControls from './GraphControls.vue'
+import LayoutControls from './LayoutControls.vue'
 import { collect as collectRows, decodeCode, fmt, toRender as toRenderGraph, type GEdge, type GNode } from '../graph-results'
 import { createTimeline, type Timeline, type TimelineCommit } from '../../../../src/timeline/index'
 import { Scrubber, VersionedDrawing } from '../versioned-drawing'
@@ -31,6 +32,9 @@ const DATASETS: Record<DatasetKey, { title: string; req: DatasetRequest }> = {
 const dataset = ref<DatasetKey>('social')
 const query = ref(EXAMPLES.social[0]!.query)
 const mode = ref<'2d' | '3d'>('2d')
+/** Force (physics) or Fixed (locked, spread out by group), and how far apart the nodes are. */
+const layoutMode = ref<'force' | 'fixed'>('force')
+const spread = ref(1)
 const labels = ref(true)
 const search = ref('')
 const tab = ref<'table' | 'plan' | 'details'>('table')
@@ -260,6 +264,8 @@ function pick(ex: { query: string }) {
 }
 
 watch(mode, (m) => view?.setMode(m))
+watch(layoutMode, (m) => view?.setLayoutMode(m))
+watch(spread, (s) => view?.setSpread(s))
 watch(labels, (on) => view?.setLabels(on))
 watch(isDark, (d) => {
   view?.setTheme(d ? 'dark' : 'light')
@@ -278,7 +284,7 @@ watch(dataset, loadDataset)
 onMounted(async () => {
   client = connect(new Worker(new URL('../../../../src/worker/worker.ts', import.meta.url), { type: 'module' }))
   try {
-    view = await createGraphView(canvas.value!, { mode: mode.value, theme: isDark.value ? 'dark' : 'light', labels: labels.value })
+    view = await createGraphView(canvas.value!, { mode: mode.value, theme: isDark.value ? 'dark' : 'light', labels: labels.value, layoutMode: layoutMode.value, spread: spread.value })
     view.onHover((hit) => {
       if (!hit || hit.kind !== 'node') return void (hover.value = null)
       const n = gNodes[hit.index]
@@ -344,6 +350,7 @@ onBeforeUnmount(() => {
         <button :class="{ on: mode === '3d' }" @click="mode = '3d'">3D</button>
       </div>
       <label class="pg-check"><input v-model="labels" type="checkbox" /> Labels</label>
+      <LayoutControls v-model:mode="layoutMode" v-model:spread="spread" />
       <button class="pg-ghost" @click="view?.fit()">Fit</button>
       <button class="pg-ghost" @click="view?.layout.reheat()">Re-run layout</button>
     </div>

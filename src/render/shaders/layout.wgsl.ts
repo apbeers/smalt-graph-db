@@ -11,7 +11,9 @@
  *
  * Positions are double-buffered (posIn → posOut; the host copies back). Pinned nodes keep their
  * position; every node's force is scaled by its mobility (1 but after a small change, see place.ts).
- * With dims = 2 the z component stays 0.
+ * With dims = 2 the z component stays 0. When the spread changes, every unpinned position (and
+ * velocity) is first scaled by rescale around the origin, a little per tick, so the drawing grows
+ * or shrinks towards its new size at once and the forces only settle the rest.
  */
 export const LAYOUT_WGSL = /* wgsl */ `
 struct Params {
@@ -32,7 +34,7 @@ struct Params {
   gravity: f32,
   decay: f32,
   maxSpeed: f32,
-  _q0: f32,
+  rescale: f32,
   _q1: f32,
   _q2: f32,
 }
@@ -66,7 +68,7 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
   let live = i < P.n;
   var pi = vec3f(0.0);
   if (live) {
-    pi = posIn[i].xyz;
+    pi = posIn[i].xyz * P.rescale;
   }
 
   // Many-body repulsion.
@@ -75,7 +77,7 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
     let j = ((t + P.tileOffset) % P.totalTiles) * TILE + lid;
     var q = vec4f(0.0, 0.0, 0.0, -1.0);
     if (j < P.n) {
-      q = vec4f(posIn[j].xyz, f32(j));
+      q = vec4f(posIn[j].xyz * P.rescale, f32(j));
     }
     tile[lid] = q;
     workgroupBarrier();
@@ -111,7 +113,7 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
     return;
   }
   if (pinned[i] != 0u) {
-    posOut[i] = vec4f(pi, 1.0);
+    posOut[i] = vec4f(posIn[i].xyz, 1.0);
     vel[i] = vec4f(0.0);
     return;
   }
@@ -125,7 +127,7 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
   let di = f32(e - s);
   for (var k = s; k < e; k = k + 1u) {
     let j = nbrs[k];
-    let d = posIn[j].xyz - pi;
+    let d = posIn[j].xyz * P.rescale - pi;
     let l = max(length(d), 1e-3);
     let dj = f32(offsets[j + 1u] - offsets[j]);
     let strength = P.linkStrength / min(di, dj);
@@ -138,7 +140,7 @@ fn tick(@builtin(global_invocation_id) gid: vec3u, @builtin(local_invocation_ind
   // After a small change, nodes far from it take only part of the force, so the drawing holds still.
   f = f * mobility[i];
 
-  var v = (vel[i].xyz + f) * (1.0 - P.decay);
+  var v = (vel[i].xyz * P.rescale + f) * (1.0 - P.decay);
   let speed = length(v);
   if (speed > P.maxSpeed) {
     v = v * (P.maxSpeed / speed);

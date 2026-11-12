@@ -6,6 +6,7 @@ import { useData } from 'vitepress'
 import { connect, type GraphClient } from '../../../../src/worker/client'
 import { createGraphView, GpuUnavailableError, type GraphView } from '../../../../src/render/index'
 import GraphControls from './GraphControls.vue'
+import LayoutControls from './LayoutControls.vue'
 import { createTimeline, type Timeline } from '../../../../src/timeline/index'
 import { Scrubber, VersionedDrawing } from '../versioned-drawing'
 
@@ -20,6 +21,9 @@ const LABELS_UP_TO = 1_000
 // 'history': a MemoryStore with the network's growth, a commit per person, and the timeline to scrub through it.
 const store = ref<'history' | 'memory' | 'csr'>('history')
 const mode = ref<'2d' | '3d'>('2d')
+/** Force (physics) or Fixed (locked, spread out by group), and how far apart the nodes are. */
+const layoutMode = ref<'force' | 'fixed'>('force')
+const spread = ref(1)
 const labels = ref(false)
 /** The reader set Labels themselves: stop following the size. */
 let labelsTouched = false
@@ -202,6 +206,8 @@ watch(search, (s) => {
   if (hits.length && hits.length < 40) view.focus(hits[0]!)
 })
 watch(mode, (m) => view?.setMode(m))
+watch(layoutMode, (m) => view?.setLayoutMode(m))
+watch(spread, (s) => view?.setSpread(s))
 watch(labels, (on) => view?.setLabels(on))
 watch(isDark, (d) => {
   view?.setTheme(d ? 'dark' : 'light')
@@ -252,7 +258,7 @@ const fmt = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v))
 onMounted(async () => {
   client = connect(new Worker(new URL('../../../../src/worker/worker.ts', import.meta.url), { type: 'module', name: 'smaltcy' }))
   try {
-    view = await createGraphView(canvas.value!, { mode: mode.value, theme: isDark.value ? 'dark' : 'light', labels: labels.value })
+    view = await createGraphView(canvas.value!, { mode: mode.value, theme: isDark.value ? 'dark' : 'light', labels: labels.value, layoutMode: layoutMode.value, spread: spread.value })
     view.onHover((hit) => {
       if (!hit || hit.kind !== 'node') return void (hover.value = null)
       const id = drawing.order[hit.index]
@@ -313,6 +319,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
         <button :class="{ on: mode === '3d' }" @click="mode = '3d'">3D</button>
       </div>
       <label class="td-check"><input v-model="labels" type="checkbox" @change="labelsTouched = true" /> Labels</label>
+      <LayoutControls v-model:mode="layoutMode" v-model:spread="spread" />
       <button class="td-ghost" @click="view?.layout.reheat()">Re-run layout</button>
       <button class="td-ghost" @click="clear">Clear highlight</button>
     </div>

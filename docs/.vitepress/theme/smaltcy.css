@@ -63,3 +63,4 @@
   .cy-run-hint .gc-touch { display: inline; }
   .cy-run-hint .gc-mouse { display: none; }
 }
+.cy-run-graph-bar input[data-spread] { width: 90px; accent-color: var(--vp-c-brand-1); }

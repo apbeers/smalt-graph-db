@@ -206,9 +206,9 @@ describe.each(['2d', '3d'] as ViewMode[])('fixed layout, %s', (mode) => {
 
 describe('packing clusters', () => {
   it('many tiny groups go on rings without overlap', () => {
-    for (const mode of ['2d', '3d'] as ViewMode[]) {
+    {
       const radii = Array.from({ length: 2000 }, (_, i) => (i < 5 ? 200 - i * 20 : 10 + (2000 - i) / 400));
-      const c = packClusters(radii, mode, 5);
+      const c = packClusters(radii, 5);
       // Brute force over all pairs.
       let ok = true;
       for (let i = 0; i < radii.length && ok; i++) {

@@ -710,6 +710,216 @@ async function main() {
     check(framedSmall === 1, `small graph framed in 3D after a mode switch (${(framedSmall * 100).toFixed(1)}%)`);
     await page.locator('canvas').screenshot({ path: join(shots, 'render-small-3d.png') });
 
+    // ---- layout modes: fixed, and the spread (explode) -------------------------------------------
+    console.log('Fixed layout and spread');
+    await page.evaluate(() => {
+      // Extent: the largest distance from the centroid. Min distance: over all pairs.
+      window.shape = (pos) => {
+        const n = pos.length / 3;
+        let cx = 0, cy = 0, cz = 0;
+        for (let i = 0; i < n; i++) {
+          cx += pos[i * 3] / n;
+          cy += pos[i * 3 + 1] / n;
+          cz += pos[i * 3 + 2] / n;
+        }
+        let extent = 0, minDist = Infinity, zMax = 0, finite = true;
+        for (let i = 0; i < n; i++) {
+          const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+          if (!Number.isFinite(x + y + z)) finite = false;
+          extent = Math.max(extent, Math.hypot(x - cx, y - cy, z - cz));
+          zMax = Math.max(zMax, Math.abs(z));
+          for (let j = i + 1; j < n; j++) minDist = Math.min(minDist, Math.hypot(x - pos[j * 3], y - pos[j * 3 + 1], z - pos[j * 3 + 2]));
+        }
+        return { extent, minDist, zMax, finite };
+      };
+      window.settleShot = async (view) => {
+        await window.settle(view, 60000);
+        view.fit();
+        await window.waitFrames(30);
+      };
+      window.people = () => window.makeGraph(150, 260, 5, 11);
+    });
+    const fx = await page.evaluate(async () => {
+      const view = window.view;
+      view.setMode('2d');
+      view.setGraph(window.people());
+      await window.settle(view, 60000);
+      view.setLayoutMode('fixed');
+      const easing = view.layout.running;
+      await window.settleShot(view);
+      const p0 = await view.positions();
+      await window.waitFrames(30);
+      const p1 = await view.positions();
+      let still = 0;
+      for (let i = 0; i < p0.length; i++) still = Math.max(still, Math.abs(p1[i] - p0[i]));
+      return { easing, running: view.layout.running, mode: view.layoutMode, still, ...window.shape(p1) };
+    });
+    check(fx.mode === 'fixed' && fx.easing && !fx.running, `fixed: nodes ease to their slots, then nothing runs (running ${fx.easing} → ${fx.running})`);
+    check(fx.still === 0, `fixed: positions hold still over 30 frames (max change ${fx.still})`);
+    check(fx.finite && fx.zMax === 0 && fx.minDist >= 27.9, `fixed 2D: every two nodes at least a spacing apart (${fx.minDist.toFixed(1)})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-fixed-2d-s1.png') });
+    // A key press counts as interaction: from now on the camera stays put when the spread changes.
+    const interact = async () => {
+      await page.locator('canvas').focus();
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowRight');
+    };
+    await interact();
+    const fx2 = await page.evaluate(async (e1) => {
+      const view = window.view;
+      view.setSpread(2);
+      await window.settle(view, 60000);
+      await window.waitFrames(20);
+      const s = window.shape(await view.positions());
+      return { ratio: s.extent / e1, spread: view.spread };
+    }, fx.extent);
+    check(fx2.spread === 2 && Math.abs(fx2.ratio - 2) < 0.02, `fixed: spread 2 doubles the extent (×${fx2.ratio.toFixed(3)})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-fixed-2d-s2.png') });
+
+    // Dragging a node in fixed mode moves that node only, and it stays.
+    const dragFrom = await page.evaluate(async () => {
+      await window.view.sync();
+      window.__p0 = await window.view.positions();
+      return window.view.screenPosition(7);
+    });
+    await page.mouse.move(box.x + dragFrom.x, box.y + dragFrom.y);
+    await page.evaluate(() => window.waitFrames(5));
+    await page.mouse.down();
+    await page.mouse.move(box.x + dragFrom.x + 50, box.y + dragFrom.y + 30, { steps: 6 });
+    await page.mouse.up();
+    const dragged = await page.evaluate(async () => {
+      await window.waitFrames(30);
+      const p0 = window.__p0, p1 = await window.view.positions();
+      let others = 0;
+      for (let i = 0; i < p0.length / 3; i++) {
+        if (i === 7) continue;
+        for (let c = 0; c < 3; c++) others = Math.max(others, Math.abs(p1[i * 3 + c] - p0[i * 3 + c]));
+      }
+      return { moved: Math.hypot(p1[21] - p0[21], p1[22] - p0[22]), others, running: window.view.layout.running };
+    });
+    check(dragged.moved > 10 && dragged.others === 0 && !dragged.running, `fixed: a dragged node moves alone and stays (${dragged.moved.toFixed(0)} units; others ${dragged.others})`);
+
+    // Kept nodes keep their slots when nodes are added.
+    const stable = await page.evaluate(async () => {
+      const view = window.view;
+      const g = window.people();
+      view.setGraph(g, { keepPositions: true });
+      // A fresh fixed layout (the dragged node back in its slot).
+      view.layout.reheat();
+      await window.settle(view, 60000);
+      const p0 = await view.positions();
+      g.nodes.push({ id: 'extra1', label: 'extra 1', group: 'Person' }, { id: 'extra2', label: 'extra 2', group: 'Brand new' });
+      g.edges.push({ source: 150, target: 3 }, { source: 151, target: 150 });
+      view.setGraph(g, { keepPositions: true, animate: true });
+      await window.settle(view, 60000);
+      const p1 = await view.positions();
+      let shift = 0;
+      for (let i = 0; i < 150 * 3; i++) shift = Math.max(shift, Math.abs(p1[i] - p0[i]));
+      return { shift, ...window.shape(p1) };
+    });
+    check(stable.shift === 0 && stable.minDist >= 27.9 * 2, `fixed: adding nodes keeps the others in their slots (max shift ${stable.shift}; min distance ${stable.minDist.toFixed(1)})`);
+
+    // 3D.
+    const fx3 = await page.evaluate(async () => {
+      const view = window.view;
+      view.setGraph(window.people());
+      view.setMode('3d');
+      await window.settleShot(view);
+      view.setSpread(1);
+      await window.settleShot(view);
+      const s = window.shape(await view.positions());
+      const p = view.screenPosition(3);
+      const hit = p ? await view.pick(p.x, p.y) : null;
+      return { ...s, hit, spread: view.spread };
+    });
+    check(fx3.finite && fx3.zMax > 20 && fx3.minDist >= 27.9 && fx3.hit?.kind === 'node', `fixed 3D: uses z, nodes a spacing apart, picked (min ${fx3.minDist.toFixed(1)} at spread ${fx3.spread}; ${JSON.stringify(fx3.hit)})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-fixed-3d-s1.png') });
+    await interact();
+    await page.evaluate(async () => {
+      window.view.setSpread(2);
+      await window.settle(window.view, 60000);
+      await window.waitFrames(20);
+    });
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-fixed-3d-s2.png') });
+
+    // Force: the spread scales the layout at rest.
+    const fs = await page.evaluate(async () => {
+      const view = window.view;
+      view.setMode('2d');
+      view.setLayoutMode('force');
+      const resumed = view.layout.running;
+      view.setSpread(1);
+      await window.settleShot(view);
+      return { resumed, e1: window.shape(await view.positions()).extent };
+    });
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-force-s1.png') });
+    await interact();
+    Object.assign(fs, await page.evaluate(async () => {
+      const view = window.view;
+      view.setSpread(2);
+      const reheated = view.layout.running;
+      await window.settle(view, 60000);
+      await window.waitFrames(20);
+      const s2 = window.shape(await view.positions());
+      return { reheated, e2: s2.extent, finite: s2.finite };
+    }));
+    check(fs.resumed && fs.reheated, 'force: switching back resumes the physics; a spread change reheats it');
+    check(fs.finite && fs.e2 > fs.e1 * 1.7 && fs.e2 < fs.e1 * 2.4, `force: spread 2 settles about twice as large (extent ${fs.e1.toFixed(0)} → ${fs.e2.toFixed(0)})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-force-s2.png') });
+    const fsHalf = await page.evaluate(async () => {
+      const view = window.view;
+      view.setSpread(0.5);
+      await window.settle(view, 60000);
+      await window.waitFrames(20);
+      return window.shape(await view.positions());
+    });
+    check(fsHalf.finite && fsHalf.extent > fs.e1 * 0.35 && fsHalf.extent < fs.e1 * 0.7, `force: spread 0.5 settles about half as large (extent ${fsHalf.extent.toFixed(0)})`);
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-force-s0.5.png') });
+
+    // Spreading and switching modes while an animated scrub runs: no errors, and it comes to rest.
+    const mixed = await page.evaluate(async () => {
+      const view = window.view;
+      for (let v = 0; v < 24; v++) {
+        const g = window.base();
+        for (let k = 0; k < v; k++) {
+          g.nodes.push({ id: `m${k}`, label: `m${k}`, group: k % 2 ? 'Event' : 'Tag' });
+          g.edges.push({ source: 48 + k, target: k });
+        }
+        view.setGraph(g, { keepPositions: true, animate: true });
+        view.setSpread(0.6 + v * 0.15);
+        if (v === 4 || v === 16) view.setLayoutMode('fixed');
+        if (v === 10) view.setLayoutMode('force');
+        if (v === 12) view.setMode('3d');
+        if (v === 20) view.setMode('2d');
+        await window.waitFrames(1);
+      }
+      const run = await window.settle(view, 60000);
+      const s = window.shape(await view.positions());
+      view.setSpread(5);
+      await window.settle(view, 60000);
+      const big = window.shape(await view.positions());
+      view.setLayoutMode('force');
+      view.setSpread(0.2);
+      await window.settle(view, 60000);
+      const small = window.shape(await view.positions());
+      view.setSpread(5);
+      await window.settle(view, 60000);
+      const forceBig = window.shape(await view.positions());
+      view.setSpread(1);
+      return { settled: run.settled, finite: s.finite && big.finite && small.finite && forceBig.finite, n: view.stats().nodes, mode: view.layoutMode, minBig: big.minDist, small: small.extent, forceBig: forceBig.extent };
+    });
+    check(mixed.settled && mixed.finite && mixed.n === 71, `spreading and switching modes during an animated scrub comes to rest (${mixed.n} nodes)`);
+    check(mixed.minBig >= 27.9 * 5 && mixed.forceBig > mixed.small * 15 && mixed.forceBig < mixed.small * 40, `spread 0.2..5 neither collapses nor blows up (fixed ×5 min distance ${mixed.minBig.toFixed(0)}; force extent ${mixed.small.toFixed(0)} at 0.2, ${mixed.forceBig.toFixed(0)} at 5)`);
+    // A small graph to read: the 48-node tree, fixed, framed.
+    await page.evaluate(async () => {
+      const view = window.view;
+      view.setLayoutMode('fixed');
+      view.setGraph(window.base());
+      await window.settleShot(view);
+    });
+    await page.locator('canvas').screenshot({ path: join(shots, 'layout-fixed-2d-small.png') });
+    await page.evaluate(() => window.view.setLayoutMode('force'));
+
     // ---- 10k nodes / 30k edges ----------------------------------------------------------------
     if (!flag('--skip-10k') && !QUICK) {
       console.log('2D, 10,000 nodes / 30,000 edges (timed run, not to rest)');
