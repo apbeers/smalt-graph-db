@@ -170,24 +170,22 @@ try {
   check((await page.inputValue('.pg-field select')) === 'metro' && (await page.inputValue('.pg-editor textarea')).includes('shortestPath'), 'Open in the playground brings the query and its dataset');
 
   // The tech demo.
-  await page.goto(`${site}demo`);
+  // Quick mode opens the demo at 1,000 people (the software GPU draws 10,000 at about a frame a second); the full run
+  // checks the default of 10,000 too.
+  const DEMO = QUICK ? { url: `${site}demo?people=1000`, nodes: '1,008', versions: '1001', label: '1,000 people (from the link)' } : { url: `${site}demo`, nodes: '10,008', versions: '10001', label: '10,000 people by default' };
+  await page.goto(DEMO.url);
   // 10,000 people by default; the full run also switches to 25,000.
-  await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 60000 });
-  check(true, 'the demo draws 10,000 people by default (10,008 nodes)');
-  if (!QUICK) {
-    await page.selectOption('.td-field select >> nth=0', '25000');
-    await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '25,008', null, { timeout: 120000 });
-    check(true, 'the demo switches to 25,000 people (25,008 nodes)');
-  }
+  const drew = await page.waitForFunction((n) => document.querySelector('.td-nums b')?.textContent === n, DEMO.nodes, { timeout: 60000 }).then(() => true, () => false);
+  check(drew, `the demo draws ${DEMO.label} (${DEMO.nodes} nodes)`);
   // The demo's timeline: the network as it grew.
   const demoSlider = page.locator('.td-tl [role="slider"]');
-  check((await demoSlider.getAttribute('aria-valuenow')) === '10001', `the demo's timeline has the network's growth (${await demoSlider.getAttribute('aria-valuenow')} versions)`);
+  check((await demoSlider.getAttribute('aria-valuenow')) === DEMO.versions, `the demo's timeline has the network's growth (${await demoSlider.getAttribute('aria-valuenow')} versions)`);
   await demoSlider.focus();
   await page.keyboard.press('PageDown');
   await page.keyboard.press('PageDown');
   await page.waitForTimeout(2000);
   const fewer = Number((await page.textContent('.td-nums b'))?.replace(/,/g, ''));
-  check(/Version \d[\d,]* of 10,001/.test((await page.textContent('.td-tl-note')) ?? ''), `stepping back shows an earlier version (${await page.textContent('.td-tl-note')})`);
+  check(/Version \d[\d,]* of [\d,]+/.test((await page.textContent('.td-tl-note')) ?? ''), `stepping back shows an earlier version (${await page.textContent('.td-tl-note')})`);
   await page.screenshot({ path: join(shots, 'demo-timeline.png') });
   await demoSlider.focus();
   await page.keyboard.press('End');
@@ -199,11 +197,20 @@ try {
   await page.click('.td-chip:has-text("Bo 1")');
   await page.waitForFunction(() => /match/.test(document.querySelector('.td-highlight')?.textContent ?? ''));
   check(/"Bo 1": \d+ match/.test(await page.textContent('.td-highlight')), `a search highlights matches (${await page.textContent('.td-highlight')})`);
-  await page.waitForTimeout(3000);
-  await page.screenshot({ path: join(shots, 'demo-2d.png') });
+  if (!QUICK) {
+    await page.waitForTimeout(3000);
+    await page.screenshot({ path: join(shots, 'demo-2d.png') });
+  }
   await page.click('.td-seg button:has-text("3D")');
-  await page.waitForTimeout(3000);
-  await page.screenshot({ path: join(shots, 'demo-3d.png') });
+  await page.waitForTimeout(QUICK ? 800 : 3000);
+  if (!QUICK) await page.screenshot({ path: join(shots, 'demo-3d.png') });
+
+  if (!QUICK) {
+    // A big network loads and draws (no screenshot: the software GPU is slow to lay out 25,000 nodes).
+    await page.selectOption('.td-field select >> nth=0', '25000');
+    const big = await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '25,008', null, { timeout: 120000 }).then(() => true, () => false);
+    check(big, 'the demo switches to 25,000 people (25,008 nodes)');
+  }
 
   // A small network: captions on, and a click shows a node's details.
   await page.click('.td-seg button:has-text("2D")');
@@ -233,8 +240,8 @@ try {
     const phone = await browser.newContext({ ...devices['iPhone 13'] });
     const pp = await phone.newPage();
     pp.on('pageerror', (e) => errors.push(e.message));
-    await pp.goto(`${site}demo`);
-    await pp.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '10,008', null, { timeout: 90000 });
+    await pp.goto(DEMO.url);
+    await pp.waitForFunction((n) => document.querySelector('.td-nums b')?.textContent === n, DEMO.nodes, { timeout: 90000 });
     await pp.locator('.td-tl').scrollIntoViewIfNeeded();
     await pp.locator('.td-tl [role="slider"]').focus();
     await pp.keyboard.press('Home');

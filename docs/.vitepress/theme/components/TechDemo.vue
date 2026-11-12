@@ -263,6 +263,14 @@ onMounted(async () => {
   } catch (e) {
     gpuError.value = e instanceof GpuUnavailableError ? 'This demo draws with WebGPU, which this browser doesn\'t offer. The queries still run.' : `The graph view couldn't start: ${(e as Error).message}`
   }
+  // ?people=1000 opens the demo at that size: links can share one, and the quick browser test uses a small one.
+  const people = Number(new URLSearchParams(location.search).get('people'))
+  const fromLink = SIZES.includes(people) && people !== size.value
+  if (fromLink) {
+    size.value = people // the size watcher loads it
+    if (!labelsTouched) labels.value = people <= LABELS_UP_TO
+    view?.setLabels(labels.value)
+  }
   timer = window.setInterval(() => {
     if (!view) return
     const s = view.stats()
@@ -270,7 +278,7 @@ onMounted(async () => {
     nums.value.tickMs = s.layoutMsPerTick
     nums.value.layout = view.layout.running
   }, 400)
-  await load()
+  if (!fromLink) await load()
 })
 
 onBeforeUnmount(() => {
