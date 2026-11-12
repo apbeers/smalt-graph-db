@@ -189,3 +189,44 @@ fn gather(@builtin(global_invocation_id) gid: vec3u) {
   outPos[i] = vec4f(p, 1.0);
 }
 `;
+
+/**
+ * The fixed layout's animation: each node eases from where it was (`from`) to its slot at the
+ * current spread, pivot + (base − pivot) × spread, with t the eased progress 0..1.
+ */
+export const TWEEN_WGSL = /* wgsl */ `
+struct T {
+  n: u32,
+  dims: u32,
+  _p0: u32,
+  _p1: u32,
+  pivot: vec3f,
+  t: f32,
+  spread: f32,
+  _q0: f32,
+  _q1: f32,
+  _q2: f32,
+}
+
+@group(0) @binding(0) var<uniform> P: T;
+@group(0) @binding(1) var<storage, read> basePos: array<vec4f>;
+@group(0) @binding(2) var<storage, read> fromPos: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> pos: array<vec4f>;
+
+@compute @workgroup_size(256)
+fn tween(@builtin(global_invocation_id) gid: vec3u) {
+  let i = gid.x;
+  if (i >= P.n) {
+    return;
+  }
+  let to = P.pivot + (basePos[i].xyz - P.pivot) * P.spread;
+  var p = mix(fromPos[i].xyz, to, P.t);
+  if (P.t >= 1.0) {
+    p = to;
+  }
+  if (P.dims == 2u) {
+    p.z = 0.0;
+  }
+  pos[i] = vec4f(p, 1.0);
+}
+`;

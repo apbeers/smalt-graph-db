@@ -1,7 +1,7 @@
 /** The force-directed layout on the GPU (see shaders/layout.wgsl.ts for the forces). */
 import type { Csr } from './csr.js';
 import { GrowableBuffer } from './gpu.js';
-import { GATHER_WGSL, LAYOUT_WGSL } from './shaders/layout.wgsl.js';
+import { GATHER_WGSL, LAYOUT_WGSL, TWEEN_WGSL } from './shaders/layout.wgsl.js';
 
 const TILE = 256;
 /** Above this many nodes, repulsion samples a rotating subset of tiles each tick. */
@@ -45,6 +45,11 @@ export function repulsionTiles(n: number): { total: number; tiles: number; scale
 
 export class GpuLayout {
   readonly settings: LayoutSettings = { ...DEFAULT_LAYOUT };
+  /**
+   * Scales the equilibrium: link distance × spread and charge × spread², so that every force
+   * (springs, repulsion, the linear gravity) scales alike and the layout at rest grows by `spread`.
+   */
+  spread = 1;
   /** Current positions (read by the renderer). vec4 per node. */
   readonly pos: GrowableBuffer;
   private readonly next: GrowableBuffer;
@@ -67,6 +72,18 @@ export class GpuLayout {
   private readonly gatherData = new Uint32Array(4);
   private readonly gatherSrc: GrowableBuffer;
   private readonly gatherOff: GrowableBuffer;
+  // The fixed layout's animation (see TWEEN_WGSL).
+  private readonly fixedBase: GrowableBuffer;
+  private readonly fixedFrom: GrowableBuffer;
+  private readonly tweenPipeline: GPUComputePipeline;
+  private readonly tweenParams: GPUBuffer;
+  private readonly tweenData = new ArrayBuffer(48);
+  private readonly tweenU32 = new Uint32Array(this.tweenData);
+  private readonly tweenF32 = new Float32Array(this.tweenData);
+  private tweenBind: GPUBindGroup | null = null;
+  private tweenKey = '';
+  /** Nodes the fixed base holds (0 until `setFixedBase`). */
+  private fixedN = 0;
   private bindGroup: GPUBindGroup | null = null;
   private bindKey = '';
   private pinnedData = new Uint32Array(64);
@@ -103,6 +120,11 @@ export class GpuLayout {
     this.gatherParams = device.createBuffer({ label: 'layout.gatherParams', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.gatherSrc = new GrowableBuffer(device, 'layout.gatherSrc', S, 4);
     this.gatherOff = new GrowableBuffer(device, 'layout.gatherOff', S, 16);
+    this.fixedBase = new GrowableBuffer(device, 'layout.fixedBase', S, 16);
+    this.fixedFrom = new GrowableBuffer(device, 'layout.fixedFrom', S, 16);
+    const tween = device.createShaderModule({ label: 'layout.tween', code: TWEEN_WGSL });
+    this.tweenPipeline = device.createComputePipeline({ label: 'layout.tween', layout: 'auto', compute: { module: tween, entryPoint: 'tween' } });
+    this.tweenParams = device.createBuffer({ label: 'layout.tweenParams', size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.query = timestamps
       ? {
           set: device.createQuerySet({ type: 'timestamp', count: 2 }),
@@ -227,6 +249,72 @@ export class GpuLayout {
     v[0] = x; v[1] = y; v[2] = z; v[3] = 1;
     this.device.queue.writeBuffer(this.pos.buffer, i * 16, v);
     this.device.queue.writeBuffer(this.vel.buffer, i * 16, ZERO4);
+    // A tween in flight holds the node where it is put.
+    if (i < this.fixedN) this.device.queue.writeBuffer(this.fixedFrom.buffer, i * 16, v);
+  }
+
+  /** Zero every velocity (before the forces take over from positions set otherwise). */
+  resetVelocities(): void {
+    this.vel.write(new Float32Array(this.vel.capacity * 4), this.vel.capacity);
+  }
+
+  /** Upload the fixed layout's base positions (xyzw, spread 1) for the first `n` nodes. */
+  setFixedBase(base: Float32Array, n = this.n): void {
+    this.fixedBase.ensure(n);
+    this.fixedFrom.ensure(n);
+    this.fixedBase.write(base, n);
+    this.fixedN = n;
+  }
+
+  /** Change one node's fixed base position. */
+  setFixedBaseAt(i: number, base: Float32Array): void {
+    if (i < 0 || i >= this.fixedN) return;
+    this.fixedBase.write(base, 1, i);
+  }
+
+  /** Start a tween from the positions drawn now. */
+  tweenFrom(): void {
+    const n = Math.min(this.n, this.fixedN);
+    if (n === 0) return;
+    const enc = this.device.createCommandEncoder({ label: 'layout.tweenFrom' });
+    enc.copyBufferToBuffer(this.pos.buffer, 0, this.fixedFrom.buffer, 0, n * 16);
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  /** Positions = from → the fixed slots at `spread` around `pivot`, at eased progress t (1: exactly there). */
+  tweenStep(t: number, spread: number, pivot: readonly number[]): void {
+    const n = Math.min(this.n, this.fixedN);
+    if (n === 0) return;
+    const key = `${this.pos.version}.${this.fixedBase.version}.${this.fixedFrom.version}`;
+    if (!this.tweenBind || key !== this.tweenKey) {
+      this.tweenKey = key;
+      this.tweenBind = this.device.createBindGroup({
+        label: 'layout.tween',
+        layout: this.tweenPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.tweenParams } },
+          { binding: 1, resource: { buffer: this.fixedBase.buffer } },
+          { binding: 2, resource: { buffer: this.fixedFrom.buffer } },
+          { binding: 3, resource: { buffer: this.pos.buffer } },
+        ],
+      });
+    }
+    const u = this.tweenU32, f = this.tweenF32;
+    u[0] = n;
+    u[1] = this.dims;
+    f[4] = pivot[0]!;
+    f[5] = pivot[1]!;
+    f[6] = pivot[2]!;
+    f[7] = t;
+    f[8] = spread;
+    this.device.queue.writeBuffer(this.tweenParams, 0, this.tweenData);
+    const enc = this.device.createCommandEncoder({ label: 'layout.tween' });
+    const pass = enc.beginComputePass({ label: 'layout.tween' });
+    pass.setPipeline(this.tweenPipeline);
+    pass.setBindGroup(0, this.tweenBind);
+    pass.dispatchWorkgroups(Math.ceil(n / TILE));
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   setPinned(i: number, on: boolean): void {
@@ -268,14 +356,15 @@ export class GpuLayout {
     u[3] = rep.total;
     u[4] = this.dims;
     f[8] = this.alpha;
-    f[9] = s.charge;
+    const k = this.spread;
+    f[9] = s.charge * k * k;
     f[10] = rep.scale;
-    f[11] = 1; // distanceMin² (d3 distanceMin = 1)
-    f[12] = s.linkDistance;
+    f[11] = k * k; // distanceMin² (d3 distanceMin = 1, scaled)
+    f[12] = s.linkDistance * k;
     f[13] = s.linkStrength;
     f[14] = s.gravity;
     f[15] = s.decay;
-    f[16] = 200;
+    f[16] = 200 * k;
     this.device.queue.writeBuffer(this.params, 0, this.paramData);
 
     const q = this.query && !this.query.busy && this.ticks % 10 === 0 ? this.query : null;
@@ -339,8 +428,9 @@ export class GpuLayout {
   }
 
   destroy(): void {
-    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs, this.mobility, this.gatherSrc, this.gatherOff]) b.destroy();
+    for (const b of [this.pos, this.next, this.vel, this.pinned, this.offsets, this.nbrs, this.mobility, this.gatherSrc, this.gatherOff, this.fixedBase, this.fixedFrom]) b.destroy();
     this.params.destroy();
+    this.tweenParams.destroy();
     this.gatherParams.destroy();
     for (const b of this.staging) b.destroy();
     if (this.query) {
