@@ -31,13 +31,25 @@ export type Request =
 
 /** A sample dataset from `@smaltworks/smaltcy/datasets`, by name. */
 export interface DatasetRequest {
-  readonly name: 'social' | 'family' | 'metro' | 'network' | 'ontology';
-  /** For `network`: the number of people (default 2,000). */
+  readonly name:
+    | 'social'
+    | 'family'
+    | 'metro'
+    | 'network'
+    | 'ontology'
+    | 'org-chart'
+    | 'packages'
+    | 'airline'
+    | 'power-grid'
+    | 'git-history'
+    | 'supply-chain'
+    | 'microservices';
+  /** For the generated graphs (`network` and the real-world shapes): the number of nodes (default 2,000 people, else 1,000). */
   readonly size?: number;
   /** The store to keep it in: `memory` (default, writable) or `csr` (read-only, compact). */
   readonly store?: 'memory' | 'csr';
   /**
-   * Keep history. The network then comes with its growth (a commit per person) and the ontology with its six months
+   * Keep history. The network and the real-world shapes then come with their growth (a commit per step) and the ontology with its six months
    * of changes; other datasets start as one commit. Kept in memory (`store` is ignored).
    */
   readonly history?: boolean;

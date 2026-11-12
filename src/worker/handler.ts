@@ -1,6 +1,6 @@
 /** The worker's request handling, kept apart from `self` so tests can run it in Node. */
 import { CsrStore, open, type Graph } from '../index.js';
-import { family, metro, network, ontology, social } from '../datasets/index.js';
+import { airline, family, gitHistory, metro, microservices, network, ontology, orgChart, packages, powerGrid, social, supplyChain } from '../datasets/index.js';
 import { SmaltcyError } from '../errors.js';
 import type { GraphStore } from '../store/interface.js';
 import type { DatasetLoaded, DatasetRequest, Overview, Request, Response } from './protocol.js';
@@ -14,6 +14,13 @@ function generate(d: DatasetRequest) {
     case 'metro': return metro();
     case 'network': return network(d.size ?? 2000, undefined, { history: d.history });
     case 'ontology': return ontology();
+    case 'org-chart': return orgChart(d.size, { history: d.history });
+    case 'packages': return packages(d.size, { history: d.history });
+    case 'airline': return airline(d.size, { history: d.history });
+    case 'power-grid': return powerGrid(d.size, { history: d.history });
+    case 'git-history': return gitHistory(d.size, { history: d.history });
+    case 'supply-chain': return supplyChain(d.size, { history: d.history });
+    case 'microservices': return microservices(d.size, { history: d.history });
   }
   throw new SmaltcyError('SMALTCY_NOT_FOUND', `No sample dataset ${String((d as { name: unknown }).name)}`);
 }

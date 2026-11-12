@@ -100,3 +100,109 @@ MATCH (a:Person {name: 'Bo 1'}), (b:Person {name: 'Gus 6'})
 MATCH p = shortestPath((a)-[:KNOWS*]-(b))
 RETURN p
 ```
+
+## Real-world shapes
+
+Seven more generated graphs, each with the shape of a real system, so a query or a drawing looks like a problem you
+know. Each takes a size and a seed, is the same every time for them, and can come with its growth as history: a
+commit per hire, publish, flight route or deploy. The examples here run on 300 nodes; the [tech demo](/demo) draws
+each from 50 to 100,000.
+
+```ts
+import { open } from '@smaltworks/smaltcy';
+import { orgChart, packages } from '@smaltworks/smaltcy/datasets';
+
+const company = open();
+company.load(orgChart(1000));
+
+// With its growth: a commit per package published.
+const registry = open({ history: true });
+registry.load(packages(5000, { seed: 3, history: true }));
+```
+
+| Function | A graph like | Shape | Labels and relationships |
+| --- | --- | --- | --- |
+| `orgChart` | A company's reporting lines | A deep tree: about one relationship per person | `:Employee`, `REPORTS_TO`, `MENTORS` |
+| `packages` | npm: packages and what they depend on | A few hubs under thousands, most with no dependents | `:Package`, `DEPENDS_ON` |
+| `airline` | Airline routes | Hub and spoke: stars joined at their centres | `:Airport:Hub`, `ROUTE {airline, km}` |
+| `powerGrid` | A power grid on a map | Spread out: a few links each, long paths | `:Substation`, `:Plant`, `LINE {kV, km}`, `FEEDS` |
+| `gitHistory` | A repository's commits | Long chains that fork and merge | `:Commit:Merge`, `PARENT` |
+| `supplyChain` | Suppliers to stores | Five tiers, four hops deep | `:Supplier` … `:Store`, `SUPPLIES {product, leadDays}` |
+| `microservices` | Services, their calls and databases | Tight team clusters, few bridges | `:Service:Gateway`, `:Database`, `CALLS`, `USES` |
+
+### Org chart
+
+The chain of command from the newest hire up to the CEO:
+
+```cypher dataset=org-chart
+MATCH (e:Employee)
+WITH e ORDER BY id(e) DESC LIMIT 1
+MATCH p = (e)-[:REPORTS_TO*]->(:Employee {level: 0})
+RETURN p
+```
+
+### Package dependencies
+
+The most depended-on packages:
+
+```cypher dataset=packages
+MATCH (p:Package)<-[:DEPENDS_ON]-(d)
+RETURN p.name AS package, count(d) AS dependents
+ORDER BY dependents DESC
+LIMIT 5
+```
+
+### Airline routes
+
+The fewest flights between the first airport and the newest:
+
+```cypher dataset=airline
+MATCH (b:Airport)
+WITH b ORDER BY id(b) DESC LIMIT 1
+MATCH (a:Airport {code: 'AAA'})
+MATCH p = shortestPath((a)-[:ROUTE*]-(b))
+RETURN p
+```
+
+### Power grid
+
+Every substation within three lines of the first one built:
+
+```cypher dataset=power-grid
+MATCH (a:Substation)
+WITH a ORDER BY id(a) LIMIT 1
+MATCH p = (a)-[:LINE*1..3]-(n)
+RETURN p
+LIMIT 200
+```
+
+### Git history
+
+The merges, and the branch each brought in:
+
+```cypher dataset=git-history
+MATCH (m:Merge)-[:PARENT]->(c:Commit)
+WHERE c.branch <> 'main'
+RETURN m.hash AS merge, c.branch AS branch, m.author AS author
+```
+
+### Supply chain
+
+Where one store's goods come from, four hops back:
+
+```cypher dataset=supply-chain
+MATCH (s:Store)
+WITH s LIMIT 1
+MATCH p = (:Supplier)-[:SUPPLIES*4]->(s)
+RETURN p
+```
+
+### Microservices
+
+The calls that cross from one team to another:
+
+```cypher dataset=microservices
+MATCH (a:Service)-[c:CALLS]->(b:Service)
+WHERE a.team <> b.team
+RETURN a, c, b
+```

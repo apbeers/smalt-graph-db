@@ -352,3 +352,5 @@ export function ontology(): GraphJSON {
   b.index('Dataset', 'name');
   return b.build();
 }
+
+export { airline, gitHistory, microservices, orgChart, packages, powerGrid, supplyChain, type ShapeOptions } from './real-world.js';

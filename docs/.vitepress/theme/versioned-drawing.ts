@@ -24,8 +24,8 @@ export class VersionedDrawing {
 
   /** `groupKey`: the property `groupOf` reads; ask the overview for it too (`overview(…, { groupKey })`). */
   constructor(
-    private readonly groupOf: GroupOf = (labels) => labels[0] ?? '',
-    readonly groupKey?: string,
+    public groupOf: GroupOf = (labels) => labels[0] ?? '',
+    public groupKey?: string,
   ) {}
 
   /** Starts from the whole graph at a version. */

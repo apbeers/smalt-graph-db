@@ -12,7 +12,7 @@ import type { GraphClient } from '../../../src/worker/client'
 import type { GraphView } from '../../../src/render/index'
 import { collect, controlsHint, encodeCode, fmt, toRender } from './graph-results'
 
-export const DATASETS = ['social', 'family', 'metro', 'network', 'ontology'] as const
+export const DATASETS = ['social', 'family', 'metro', 'network', 'ontology', 'org-chart', 'packages', 'airline', 'power-grid', 'git-history', 'supply-chain', 'microservices'] as const
 /** Datasets the examples load with their history, for AT VERSION, AT TIME and the temporal functions. */
 export const WITH_HISTORY: ReadonlySet<DatasetName> = new Set(['ontology'])
 export type DatasetName = (typeof DATASETS)[number]
@@ -87,8 +87,18 @@ export function runnablePlugin(md: MarkdownIt): void {
 // ---------------------------------------------------------------------------------------------------------------------
 // In the browser
 
-/** The network examples run on 2,000 people: enough to show traversals, quick to load. */
-const DATASET_SIZE: Partial<Record<DatasetName, number>> = { network: 2000 }
+/** The network examples run on 2,000 people: enough to show traversals, quick to load. The real-world shapes on 300
+ * nodes: small enough to read. */
+const DATASET_SIZE: Partial<Record<DatasetName, number>> = {
+  network: 2000,
+  'org-chart': 300,
+  packages: 300,
+  airline: 300,
+  'power-grid': 300,
+  'git-history': 300,
+  'supply-chain': 300,
+  microservices: 300,
+}
 /** Views kept drawing at once: each holds a GPU context. Older ones give their canvas back. */
 const MAX_VIEWS = 4
 

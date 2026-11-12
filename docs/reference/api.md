@@ -54,6 +54,6 @@ its own.
 | `@smaltworks/smaltcy/render` | The GPU graph view and `resultsToGraph` ([guide](/guide/rendering)) |
 | `@smaltworks/smaltcy/timeline` | `createTimeline`: a DOM timeline over a graph's commits ([time travel](/guide/time-travel)) |
 | `@smaltworks/smaltcy/client` | `connect` and `GraphClient`, with no engine: for a page whose graph runs in a worker |
-| `@smaltworks/smaltcy/datasets` | The sample graphs: `social`, `family`, `metro`, `network` |
+| `@smaltworks/smaltcy/datasets` | The sample graphs: `social`, `family`, `metro`, `network`, `ontology`, and the real-world shapes `orgChart`, `packages`, `airline`, `powerGrid`, `gitHistory`, `supplyChain`, `microservices` |
 | `@smaltworks/smaltcy/worker` | The worker script |
 | `@smaltworks/smaltcy/worker-runtime` | `createHandler`, to build a worker of your own |

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// The tech demo: a large generated network, drawn whole by the GPU renderer in 2D or 3D. Searches and queries
-// highlight their results inside it, and the numbers show what each step took.
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// The tech demo: a generated graph with the shape of a real system (a social network, an org chart, package
+// dependencies…), drawn whole by the GPU renderer in 2D or 3D. Searches and queries highlight their results inside
+// it, and the numbers show what each step took.
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useData } from 'vitepress'
 import { connect, type GraphClient } from '../../../../src/worker/client'
 import { createGraphView, GpuUnavailableError, type GraphView } from '../../../../src/render/index'
@@ -9,6 +10,7 @@ import GraphControls from './GraphControls.vue'
 import LayoutControls from './LayoutControls.vue'
 import { createTimeline, type Timeline } from '../../../../src/timeline/index'
 import { Scrubber, VersionedDrawing } from '../versioned-drawing'
+import { DEMO_DATASETS } from '../demo-datasets'
 
 const { isDark } = useData()
 
@@ -16,9 +18,12 @@ const { isDark } = useData()
 // quickly on most GPUs.
 const SIZES = [50, 200, 1_000, 10_000, 25_000, 50_000, 100_000]
 const size = ref(10_000)
+/** Which real system the graph has the shape of. */
+const datasetName = ref<string>(DEMO_DATASETS[0]!.name)
+const ds = computed(() => DEMO_DATASETS.find((d) => d.name === datasetName.value) ?? DEMO_DATASETS[0]!)
 /** Graphs this small show their captions unless the reader turns them off. */
 const LABELS_UP_TO = 1_000
-// 'history': a MemoryStore with the network's growth, a commit per person, and the timeline to scrub through it.
+// 'history': a MemoryStore with the graph's growth, a commit per step, and the timeline to scrub through it.
 const store = ref<'history' | 'memory' | 'csr'>('history')
 const mode = ref<'2d' | '3d'>('2d')
 /** Force (physics) or Fixed (locked, spread out by group), and how far apart the nodes are. */
@@ -48,16 +53,7 @@ const details = ref<Details | null>(null)
 
 const nums = ref({ nodes: 0, rels: 0, loadMs: 0, transferMs: 0, drawMs: 0, fps: 0, tickMs: 0, layout: false, queryMs: 0, rows: 0 })
 
-const SEARCHES = ['Bo 1', 'Yara', 'Kai 7', 'Lisbon']
-const QUERIES = [
-  { title: 'Two hops from Bo 1', query: "MATCH (:Person {name: 'Bo 1'})-[:KNOWS*1..2]-(f)\nRETURN DISTINCT f" },
-  { title: 'Shortest path', query: "MATCH (a:Person {name: 'Bo 1'}), (b:Person {name: 'Gus 6'})\nMATCH p = shortestPath((a)-[:KNOWS*]-(b))\nRETURN p" },
-  { title: 'The 50 most connected', query: 'MATCH (p:Person)-[:KNOWS]-(f)\nWITH p, count(f) AS friends\nORDER BY friends DESC LIMIT 50\nRETURN p' },
-  { title: 'Everyone in Lisbon', query: "MATCH (p:Person)-[:LIVES_IN]->(:City {name: 'Lisbon'})\nRETURN p" },
-  { title: 'Community 3', query: 'MATCH (p:Person {community: 3})\nRETURN p' },
-  { title: 'Over 70 who know someone under 20', query: 'MATCH (a:Person)-[:KNOWS]-(b:Person)\nWHERE a.age > 70 AND b.age < 20\nRETURN a, b' },
-]
-const query = ref(QUERIES[0]!.query)
+const query = ref(ds.value.queries[0]!.query)
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let client: GraphClient | null = null
@@ -66,8 +62,8 @@ let timer = 0
 /** Engine id → index in the drawing. */
 let indexOf = new Map<number, number>()
 
-/** The drawing at the version the timeline shows, coloured by community. */
-const drawing = new VersionedDrawing((labels, community) => (labels.includes('City') ? 'City' : `Community ${community ?? ''}`), 'community')
+/** The drawing at the version the timeline shows, coloured by the dataset's group (a community, a department…). */
+const drawing = new VersionedDrawing()
 const tlHost = ref<HTMLElement | null>(null)
 let timeline: Timeline | null = null
 const latest = ref(0)
@@ -117,12 +113,15 @@ async function loadOnce() {
   highlightText.value = ''
   try {
     const history = store.value === 'history'
-    const loaded = await client.dataset({ name: 'network', size: size.value, ...(history ? { history: true } : { store: store.value as 'memory' | 'csr' }) })
+    const d = ds.value
+    drawing.groupOf = d.group
+    drawing.groupKey = d.groupKey
+    const loaded = await client.dataset({ name: d.name, size: size.value, ...(history ? { history: true } : { store: store.value as 'memory' | 'csr' }) })
     nums.value.nodes = loaded.nodes
     nums.value.rels = loaded.relationships
     if (!loaded.reused) nums.value.loadMs = loaded.ms
     latest.value = viewing.value = loaded.version ?? 0
-    const ov = await client.overview(undefined, { groupKey: 'community' })
+    const ov = await client.overview(undefined, { groupKey: d.groupKey })
     nums.value.transferMs = ov.ms
     drawing.reset(ov, latest.value)
     if (view) {
@@ -132,7 +131,7 @@ async function loadOnce() {
       view.fit()
       nums.value.drawMs = performance.now() - t1
     }
-    // The timeline: the network's growth, a commit per person.
+    // The timeline: the graph's growth, a commit per step.
     if (history) {
       const commits = (await client.commits()).map((c) => ({ version: c.version, time: c.time, author: c.author, message: c.message, size: c.size }))
       if (!timeline && tlHost.value) timeline = createTimeline(tlHost.value, { commits, value: latest.value, theme: isDark.value ? 'dark' : 'light', onChange: (v) => {
@@ -213,7 +212,12 @@ watch(isDark, (d) => {
   view?.setTheme(d ? 'dark' : 'light')
   timeline?.setTheme(d ? 'dark' : 'light')
 })
-watch([size, store], () => {
+watch(datasetName, () => {
+  query.value = ds.value.queries[0]!.query
+  search.value = ''
+  syncLink()
+})
+watch([size, store, datasetName], () => {
   details.value = null
   if (!labelsTouched) labels.value = size.value <= LABELS_UP_TO
   return load()
@@ -269,12 +273,16 @@ onMounted(async () => {
   } catch (e) {
     gpuError.value = e instanceof GpuUnavailableError ? 'This demo draws with WebGPU, which this browser doesn\'t offer. The queries still run.' : `The graph view couldn't start: ${(e as Error).message}`
   }
-  // ?people=1000 opens the demo at that size: links can share one, and the quick browser test uses a small one.
-  const people = Number(new URLSearchParams(location.search).get('people'))
-  const fromLink = SIZES.includes(people) && people !== size.value
+  // ?dataset=org-chart&size=1000 opens the demo on that dataset at that size (?people= is the old name for size):
+  // links can share one, and the quick browser test uses a small one.
+  const params = new URLSearchParams(location.search)
+  const people = Number(params.get('size') ?? params.get('people'))
+  const named = DEMO_DATASETS.find((d) => d.name === params.get('dataset'))
+  const fromLink = (SIZES.includes(people) && people !== size.value) || (!!named && named.name !== datasetName.value)
   if (fromLink) {
-    size.value = people // the size watcher loads it
-    if (!labelsTouched) labels.value = people <= LABELS_UP_TO
+    if (named) datasetName.value = named.name
+    if (SIZES.includes(people)) size.value = people // the watchers load it
+    if (!labelsTouched) labels.value = size.value <= LABELS_UP_TO
     view?.setLabels(labels.value)
   }
   timer = window.setInterval(() => {
@@ -294,6 +302,16 @@ onBeforeUnmount(() => {
   client?.close()
 })
 
+/** Keeps the address in step with the dataset and size, so the page can be shared as it is. */
+function syncLink() {
+  const u = new URL(location.href)
+  u.searchParams.delete('people')
+  u.searchParams.set('dataset', datasetName.value)
+  u.searchParams.set('size', String(size.value))
+  history.replaceState(history.state, '', u)
+}
+watch(size, syncLink)
+
 const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString())
 </script>
 
@@ -301,7 +319,13 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
   <div class="td">
     <div class="td-bar">
       <label class="td-field">
-        <span class="td-eyebrow">People</span>
+        <span class="td-eyebrow">Dataset</span>
+        <select v-model="datasetName" :disabled="busy" aria-label="Dataset">
+          <option v-for="d in DEMO_DATASETS" :key="d.name" :value="d.name">{{ d.title }}: {{ d.shape }}</option>
+        </select>
+      </label>
+      <label class="td-field">
+        <span class="td-eyebrow">Nodes</span>
         <select v-model.number="size" :disabled="busy">
           <option v-for="s in SIZES" :key="s" :value="s">{{ s.toLocaleString() }}</option>
         </select>
@@ -347,7 +371,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
       <div v-show="store === 'history'" class="td-tl">
         <p class="td-tl-note">
           <span v-if="viewing < latest">Version {{ viewing.toLocaleString() }} of {{ latest.toLocaleString() }}: queries read this version.</span>
-          <span v-else>The network as it grew, a person at a time: drag the timeline, or press Play.</span>
+          <span v-else>{{ ds.grew }}: drag the timeline, or press Play.</span>
         </p>
         <div ref="tlHost" />
       </div>
@@ -364,7 +388,7 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
           <dl>
             <template v-for="(v, k) in details.properties" :key="k"><dt>{{ k }}</dt><dd>{{ fmt(v) }}</dd></template>
             <template v-if="details.city"><dt>lives in</dt><dd>{{ details.city }}</dd></template>
-            <template v-if="details.created"><dt>joined</dt><dd>{{ details.created.slice(0, 16).replace('T', ' ') }}</dd></template>
+            <template v-if="details.created"><dt>created</dt><dd>{{ details.created.slice(0, 16).replace('T', ' ') }}</dd></template>
           </dl>
           <p class="td-eyebrow">{{ details.connections.length }} connection{{ details.connections.length === 1 ? '' : 's' }}</p>
           <ul class="td-conn">
@@ -372,25 +396,24 @@ const ms = (v: number) => (v < 10 ? v.toFixed(1) : Math.round(v).toLocaleString(
             <li v-if="details.connections.length > 40" class="td-more">and {{ details.connections.length - 40 }} more</li>
           </ul>
         </section>
-        <p v-else-if="size <= LABELS_UP_TO" class="td-note">Click a person or a city to see its properties and connections.</p>
+        <p v-else-if="size <= LABELS_UP_TO" class="td-note">Click a {{ ds.noun }} to see its properties and connections.</p>
         <label class="td-field">
           <span class="td-eyebrow">Search the drawing (on the GPU's captions)</span>
-          <input v-model="search" type="search" placeholder="A name or a city" />
+          <input v-model="search" type="search" placeholder="Part of a name" />
         </label>
         <div class="td-chips">
-          <button v-for="s in SEARCHES" :key="s" class="td-chip" @click="doSearch(s)">{{ s }}</button>
+          <button v-for="s in ds.searches" :key="s" class="td-chip" @click="doSearch(s)">{{ s }}</button>
         </div>
         <span class="td-eyebrow">Query, and highlight the result</span>
         <div class="td-chips">
-          <button v-for="q in QUERIES" :key="q.title" class="td-chip" :disabled="busy" :title="q.query" @click="run(q.query)">{{ q.title }}</button>
+          <button v-for="q in ds.queries" :key="q.title" class="td-chip" :disabled="busy" :title="q.query" @click="run(q.query)">{{ q.title }}</button>
         </div>
         <textarea v-model="query" class="td-query" spellcheck="false" aria-label="Cypher query" @keydown.ctrl.enter.prevent="run()" @keydown.meta.enter.prevent="run()" />
         <button class="td-primary" :disabled="busy" @click="run()">Run and highlight</button>
         <p v-if="error" class="td-error" role="alert"><b>Error</b> {{ error }}</p>
         <p class="td-note">
-          The network grows by preferential attachment: well-connected people make more friends, mostly within their
-          community. It's generated in the engine's worker; the layout runs in WebGPU compute shaders. Above 20,480
-          nodes the layout samples repulsion each tick.
+          {{ ds.about }} Generated in the engine's worker as you pick it; the layout runs in WebGPU compute shaders.
+          Above 20,480 nodes the layout samples repulsion each tick.
         </p>
       </aside>
     </div>

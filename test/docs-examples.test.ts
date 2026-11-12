@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { EXAMPLES, type DatasetKey } from '../docs/.vitepress/theme/components/examples.js';
-import { family, metro, network, ontology, social } from '../src/datasets/index.js';
+import { airline, family, gitHistory, metro, microservices, network, ontology, orgChart, packages, powerGrid, social, supplyChain } from '../src/datasets/index.js';
 import { open } from '../src/index.js';
 import { WITH_HISTORY, datasetOf, type DatasetName } from '../docs/.vitepress/theme/runnable.js';
 
@@ -29,7 +29,21 @@ for (const file of markdown('docs')) {
   }
 }
 
-const DATA: Record<DatasetName, () => ReturnType<typeof social>> = { social, family, metro, network: () => network(2000), ontology };
+// The sizes theme/runnable.ts loads.
+const DATA: Record<DatasetName, () => ReturnType<typeof social>> = {
+  social,
+  family,
+  metro,
+  network: () => network(2000),
+  ontology,
+  'org-chart': () => orgChart(300),
+  packages: () => packages(300),
+  airline: () => airline(300),
+  'power-grid': () => powerGrid(300),
+  'git-history': () => gitHistory(300),
+  'supply-chain': () => supplyChain(300),
+  microservices: () => microservices(300),
+};
 
 describe('docs examples', () => {
   test('there are examples', () => expect(blocks.length).toBeGreaterThan(20));

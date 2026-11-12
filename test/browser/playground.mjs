@@ -207,14 +207,14 @@ try {
 
   if (!QUICK) {
     // A big network loads and draws (no screenshot: the software GPU is slow to lay out 25,000 nodes).
-    await page.selectOption('.td-field select >> nth=0', '25000');
+    await page.selectOption('.td-field select >> nth=1', '25000');
     const big = await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '25,008', null, { timeout: 120000 }).then(() => true, () => false);
     check(big, 'the demo switches to 25,000 people (25,008 nodes)');
   }
 
   // A small network: captions on, and a click shows a node's details.
   await page.click('.td-seg button:has-text("2D")');
-  await page.selectOption('.td-field select >> nth=0', '50');
+  await page.selectOption('.td-field select >> nth=1', '50');
   await page.waitForFunction(() => document.querySelector('.td-nums b')?.textContent === '58', null, { timeout: 60000 });
   check(await page.isChecked('.td-check input'), 'a small network shows its captions');
   await page.waitForTimeout(4000); // the layout settles
@@ -241,6 +241,18 @@ try {
   await page.screenshot({ path: join(shots, 'demo-fixed-spread.png') });
   await page.locator('.lc-spread input').fill('0');
   await page.click('.lc-seg button:has-text("Force")');
+
+  // The other datasets, each with the shape of a real system: at 50 nodes each loads, draws, and its first query
+  // highlights something.
+  const SHAPES = { 'org-chart': '50', packages: '50', airline: '50', 'power-grid': '52', 'git-history': '50', 'supply-chain': '50', microservices: '50' };
+  for (const [name, nodes] of Object.entries(SHAPES)) {
+    await page.selectOption('.td-field select >> nth=0', name);
+    const loaded = await page.waitForFunction((n) => document.querySelector('.td-nums b')?.textContent === n && !document.querySelector('.td-primary')?.disabled, nodes, { timeout: 30000 }).then(() => true, () => false);
+    await page.click('.td-chips >> nth=1 >> .td-chip >> nth=0');
+    const lit = await page.waitForFunction(() => /^[1-9][\d,]* nodes? highlighted/.test(document.querySelector('.td-highlight')?.textContent ?? ''), null, { timeout: 15000 }).then(() => true, () => false);
+    check(loaded && lit && page.url().includes(`dataset=${name}`), `the demo's ${name} dataset loads (${nodes} nodes) and its first query highlights (${await page.textContent('.td-highlight').catch(() => '')})`);
+    if (!QUICK) await page.screenshot({ path: join(shots, `demo-${name}.png`) });
+  }
 
   // On a phone, playing the demo's timeline must not move the page: its readout changes length every step, and a
   // grid column that grows with its content made the whole page shake.
