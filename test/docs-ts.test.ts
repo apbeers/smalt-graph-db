@@ -32,7 +32,7 @@ test('the modules guide type-checks', () => {
     JSON.stringify({
       extends: `${root}/tsconfig.json`,
       compilerOptions: { noEmit: true, paths, types: ['node'], typeRoots: [`${root}/node_modules/@types`] },
-      include: [...files, `${root}/src/render/webgpu.d.ts`],
+      include: files,
     }),
   );
   let out = '';

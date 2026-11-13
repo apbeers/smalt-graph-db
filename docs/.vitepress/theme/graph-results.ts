@@ -1,7 +1,7 @@
 // Query results to a graph the renderer draws: every node, relationship and path in the rows. Shared by the playground,
 // the runnable examples and the tech demo.
-import { defaultCaption, resultsToGraph } from '../../../src/render/results'
-import type { RenderGraph } from '../../../src/render/types'
+import { defaultCaption, resultsToGraph } from '../../../src/render/index'
+import type { RenderGraph } from '../../../src/render/index'
 
 export interface GNode {
   id: number

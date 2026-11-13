@@ -112,7 +112,9 @@ try {
   await page.selectOption('.pg-field select', 'ontology');
   await page.waitForFunction(() => /26 versions/.test(document.querySelector('.pg-status')?.textContent ?? ''), null, { timeout: 60000 });
   const slider = page.locator('.pg-timeline [role="slider"]');
-  check((await slider.getAttribute('aria-valuenow')) === '26', `the ontology's timeline is at its latest version (${await slider.getAttribute('aria-valuenow')})`);
+  // The status says 26 versions as soon as the dataset loads; the timeline follows once its commits arrive.
+  const atLatest = await page.waitForFunction(() => document.querySelector('.pg-timeline [role="slider"]')?.getAttribute('aria-valuenow') === '26', null, { timeout: 10000 }).then(() => true, () => false);
+  check(atLatest, `the ontology's timeline is at its latest version (${await slider.getAttribute('aria-valuenow')})`);
   const drawn = async () => Number(/^(\d+) nodes/.exec((await page.textContent('.pg-stats')) ?? '')?.[1] ?? -1);
   const waitDrawn = (n) => page.waitForFunction((n) => (document.querySelector('.pg-stats')?.textContent ?? '').startsWith(`${n} nodes`), n, { timeout: 15000 }).then(() => true, () => false);
   check(await waitDrawn(31), `the latest version is drawn (${await drawn()} nodes)`);

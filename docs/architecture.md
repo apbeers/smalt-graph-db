@@ -15,7 +15,7 @@ Plans built by programs or other languages ──────────┤
              Store interface ──┬─ MemoryStore (adjacency lists)     src/store/
                                └─ CsrStore (compressed sparse rows)
 
-Results ─→ GPU renderer: WebGPU compute layout, 2D and 3D drawing    src/render/
+Results ─→ GPU renderer: WebGPU compute layout, 2D and 3D drawing    smaltkit/graph
 ```
 
 Beneath the plan format is the function library (`src/functions/`): every operator and function a plan calls by

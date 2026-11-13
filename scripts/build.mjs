@@ -36,6 +36,8 @@ await esbuild.build({
   minify,
   sourcemap: true,
   logLevel: 'warning',
+  // The shared kit is a dependency: the app's bundler or import map resolves it, once for every package using it.
+  external: ['smaltkit', 'smaltkit/*'],
 });
 
 execFileSync('node_modules/.bin/tsc', ['-p', 'tsconfig.build.json'], { stdio: 'inherit' });

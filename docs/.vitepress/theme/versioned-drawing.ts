@@ -3,8 +3,8 @@
 // nodes that changed, for the renderer's animated transitions. Shared by the playground and the tech demo.
 import type { GraphDiff } from '../../../src/store/interface'
 import type { Overview } from '../../../src/worker/protocol'
-import type { RenderGraph } from '../../../src/render/types'
-import { defaultCaption } from '../../../src/render/results'
+import type { RenderGraph } from '../../../src/render/index'
+import { defaultCaption } from '../../../src/render/index'
 
 interface DrawnNode {
   labels: string[]

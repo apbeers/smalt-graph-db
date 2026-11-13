@@ -1,7 +1,10 @@
 # Drawing graphs
 
 `@smaltworks/smaltcy/render` draws a graph on a canvas with WebGPU. The force-directed layout runs in compute
-shaders, and nodes, relationships, labels and picking are all drawn on the GPU, in 2D or 3D.
+shaders, and nodes, relationships, labels and picking are all drawn on the GPU, in 2D or 3D. It is the smalt family's
+shared graph view, `smaltkit/graph`, re-exported: import it from either. With `theme: 'css'` it takes its colours from
+the page's `--sk-*` custom properties (`--sk-surface`, `--sk-border`, `--sk-text`, `--sk-sel`, the group colours
+`--sk-c0` to `--sk-c11`), the ones smaltkit's charts read.
 
 ```ts
 import { createGraphView, GpuUnavailableError } from '@smaltworks/smaltcy/render';
